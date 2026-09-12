@@ -1,0 +1,213 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+  <meta name="theme-color" content="#0f172a">
+  <title>TG Bulk Sender</title>
+  <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+
+<header class="topbar">
+  <div class="brand"><span class="brand-icon">✈</span> TG<span class="brand-accent">Bulk</span></div>
+  <nav class="main-nav" id="mainNav">
+    <a href="#" data-page="dashboard" class="nav-link">Dashboard</a>
+    <a href="#" data-page="accounts" class="nav-link">Accounts</a>
+    <a href="#" data-page="scrape" class="nav-link">Scrape</a>
+    <a href="#" data-page="send" class="nav-link">Send</a>
+  </nav>
+  <button class="hamburger" id="hamburger" aria-label="Menu"><span></span><span></span><span></span></button>
+</header>
+
+<main id="app">
+
+  <!-- ============ DASHBOARD ============ -->
+  <section id="page-dashboard" class="page active">
+    <div class="page-head">
+      <h1>Dashboard</h1>
+      <p class="muted">Live overview of your accounts, scrapes and campaigns.</p>
+    </div>
+    <div class="stats-grid" id="statsGrid"></div>
+    <div class="card">
+      <h2>Recent campaigns</h2>
+      <div id="dashCampaigns" class="list-block"></div>
+    </div>
+    <div class="card">
+      <h2>Recent scrape jobs</h2>
+      <div id="dashJobs" class="list-block"></div>
+    </div>
+  </section>
+
+  <!-- ============ ACCOUNTS ============ -->
+  <section id="page-accounts" class="page">
+    <div class="page-head">
+      <h1>Accounts</h1>
+      <p class="muted">Add real Telegram accounts. They send the messages (bots can't start chats).</p>
+    </div>
+
+    <div class="card">
+      <h2>Add account</h2>
+      <div class="form-row">
+        <input id="accPhone" class="input" inputmode="tel" placeholder="+15551234567 (international)">
+        <button id="btnSendCode" class="btn primary">Send code</button>
+      </div>
+      <div id="codeBox" class="code-box" hidden>
+        <div class="form-row">
+          <input id="accCode" class="input" inputmode="numeric" placeholder="Code from Telegram">
+          <input id="accPass" class="input" type="password" placeholder="2FA password (if any)">
+          <button id="btnVerify" class="btn primary">Verify & save</button>
+        </div>
+        <p class="hint" id="needPassHint" hidden>This account needs a 2FA password — enter it above and press Verify.</p>
+      </div>
+      <p class="hint">⚠ Need <code>api_id</code> + <code>api_hash</code> from <a href="https://my.telegram.org" target="_blank" rel="noopener">my.telegram.org</a> — put them in <code>config.json</code> next to <code>run.py</code> and restart.</p>
+    </div>
+
+    <div class="card">
+      <h2>Logged-in accounts <span class="count-chip" id="accCount">0</span></h2>
+      <div id="accountsList" class="list-block"></div>
+    </div>
+  </section>
+
+  <!-- ============ SCRAPE ============ -->
+  <section id="page-scrape" class="page">
+    <div class="page-head">
+      <h1>Scrape group members</h1>
+      <p class="muted">Pull all members (username / phone / name / ID) from any group you can access.</p>
+    </div>
+
+    <div class="card">
+      <h2>New scrape</h2>
+      <div class="form-row">
+        <select id="scrapeAccount" class="input sel"></select>
+        <input id="scrapeGroup" class="input" placeholder="@group or https://t.me/group">
+        <button id="btnStartScrape" class="btn primary">Start</button>
+      </div>
+      <p class="hint">Best results when the account is an <strong>admin</strong> of the group. The account must be a member first.</p>
+    </div>
+
+    <div class="card">
+      <h2>Scrape jobs</h2>
+      <div id="scrapeJobs" class="list-block"></div>
+    </div>
+
+    <div class="card" id="membersCard" hidden>
+      <div class="card-head">
+        <h2>Members — <span id="membersJobTitle"></span></h2>
+        <div class="head-actions">
+          <button id="btnExport" class="btn ghost sm">Export CSV</button>
+          <button id="btnUseCampaign" class="btn primary sm">Use in campaign →</button>
+        </div>
+      </div>
+      <div class="filter-row">
+        <label class="check"><input type="checkbox" id="fUsername"> has username</label>
+        <label class="check"><input type="checkbox" id="fPhone"> has phone</label>
+        <label class="check"><input type="checkbox" id="fNoBot" checked> no bots</label>
+        <input id="fSearch" class="input sm" placeholder="Search name / username">
+        <span class="muted sm" id="membersCount"></span>
+      </div>
+      <div class="table-wrap">
+        <table class="table">
+          <thead><tr><th>Name</th><th>Username</th><th>Phone</th><th>ID</th><th>Badges</th></tr></thead>
+          <tbody id="membersBody"></tbody>
+        </table>
+      </div>
+      <button id="btnLoadMore" class="btn ghost block">Load more</button>
+    </div>
+  </section>
+
+  <!-- ============ SEND ============ -->
+  <section id="page-send" class="page">
+    <div class="page-head">
+      <h1>Bulk send</h1>
+      <p class="muted">Pick targets, write your message, and let your accounts deliver it with safe random delays.</p>
+    </div>
+
+    <div class="card">
+      <h2>New campaign</h2>
+      <div class="campaign-grid">
+        <label class="field full">Campaign name
+          <input id="cpName" class="input" value="Campaign">
+        </label>
+        <label class="field">Target group (scrape job)
+          <select id="cpJob" class="input sel"></select>
+        </label>
+        <label class="field full">OR paste custom targets (one per line, username or number)
+          <textarea id="cpCustom" class="input" rows="3" placeholder="@user1&#10;+15551234567&#10;@user2"></textarea>
+        </label>
+        <div class="field full">
+          <span class="label">Accounts to send from</span>
+          <div id="cpAccounts" class="chips"></div>
+        </div>
+        <label class="field full">Message
+          <textarea id="cpMessage" class="input" rows="4" placeholder="Hi $name!&#10;Support: @mychannel&#10;Use $name and $username as placeholders"></textarea>
+        </label>
+        <label class="field">Image / media (optional)
+          <input id="cpMedia" class="input" type="file">
+        </label>
+        <div class="field">
+          <span class="label">Filters <span class="muted">(apply when using a scrape job)</span></span>
+          <div class="filter-row wrap">
+            <label class="check"><input type="checkbox" id="cpFUsername"> has username</label>
+            <label class="check"><input type="checkbox" id="cpFPhone"> has phone</label>
+            <label class="check"><input type="checkbox" id="cpFNoBot" checked> no bots</label>
+            <input id="cpFSearch" class="input sm" placeholder="search...">
+          </div>
+        </div>
+        <div class="field">
+          <span class="label">Delays (seconds between messages)</span>
+          <div class="row3">
+            <input id="cpMinDelay" class="input" type="number" min="1" value="30">
+            <input id="cpMaxDelay" class="input" type="number" min="1" value="90">
+            <input id="cpMaxPerAcc" class="input" type="number" min="0" value="0" title="0 = unlimited">
+          </div>
+          <span class="hint">min — max — max per account (0 = no limit)</span>
+        </div>
+        <button id="btnCreateCampaign" class="btn primary full">Create campaign (snapshot targets)</button>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>Campaigns <span class="count-chip" id="cpCount">0</span></h2>
+      <div id="campaignsList" class="list-block"></div>
+    </div>
+
+    <div class="card" id="campaignDetailCard" hidden>
+      <div class="card-head">
+        <h2 id="cpDetailTitle">Campaign</h2>
+        <button id="btnCloseDetail" class="btn ghost sm">Close</button>
+      </div>
+      <div id="cpDetailStats" class="detail-stats"></div>
+      <div id="cpDetailProgress" class="progress-outer"><div class="progress-inner" id="cpDetailBar"></div></div>
+      <div class="table-wrap">
+        <table class="table">
+          <thead><tr><th>Time</th><th>Account</th><th>Target</th><th>Status</th><th>Error</th></tr></thead>
+          <tbody id="cpLogsBody"></tbody>
+        </table>
+      </div>
+    </div>
+  </section>
+</main>
+
+<nav class="bottom-nav">
+  <a href="#" data-page="dashboard" class="nav-link"><span>▦</span>Home</a>
+  <a href="#" data-page="accounts" class="nav-link"><span>👤</span>Accounts</a>
+  <a href="#" data-page="scrape" class="nav-link"><span>⇣</span>Scrape</a>
+  <a href="#" data-page="send" class="nav-link"><span>✉</span>Send</a>
+</nav>
+
+<div id="toastBox"></div>
+
+<div id="lockScreen">
+  <div class="lock-card">
+    <div class="lock-title"><span class="brand-icon">✈</span> TG<span class="brand-accent">Bulk</span></div>
+    <p class="muted sm">Enter password to continue</p>
+    <input id="lockPass" class="input" type="password" placeholder="Password" autocomplete="current-password">
+    <button id="btnUnlock" class="btn primary block">Unlock</button>
+    <p class="hint" id="lockErr" hidden>Wrong password</p>
+  </div>
+</div>
+
+<script src="js/app.js"></script>
+</body>
+</html>
