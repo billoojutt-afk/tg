@@ -1,6 +1,6 @@
 /* ================= helpers ================= */
 const $ = (s) => document.querySelector(s);
-const $$ = (s) => [...document.querySelectorAll(s)];
+const $$ = (s, root) => [...(root || document).querySelectorAll(s)];
 const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 
 async function api(path, opts = {}) {
@@ -16,10 +16,19 @@ async function api(path, opts = {}) {
   let data = null;
   try { data = await res.json(); } catch { /* empty */ }
   if (!res.ok) {
-    if (res.status === 401 && path !== "/login") showLogin();
-    throw new Error((data && data.detail) || "Request failed (" + res.status + ")");
+    const err = new Error((data && data.detail) || "Request failed (" + res.status + ")");
+    err.status = res.status;
+    if (res.status === 401 && path !== "/login" && !opts.silent) showLoginOnce();
+    throw err;
   }
   return data;
+}
+
+let _loginPrompted = false;
+function showLoginOnce() {
+  if (_loginPrompted) return;
+  _loginPrompted = true;
+  openLogin();
 }
 
 function toast(msg, type = "") {
@@ -31,31 +40,130 @@ function toast(msg, type = "") {
   setTimeout(() => el.remove(), 4000);
 }
 
-function showLogin() {
-  $("#lockScreen").classList.add("show");
+let shopData = null;
+let _valAbort = null;
+
+function showLanding() {
+  $("#landing").style.display = "flex";
+  $("#appShell").hidden = true;
+  loadLandingPacks();
 }
 
-function hideLogin() {
-  $("#lockScreen").classList.remove("show");
+function showAppShell() {
+  $("#appShell").hidden = false;
+  $("#landing").style.display = "none";
 }
+
+function openLogin() {
+  $("#lockErr").hidden = true;
+  $("#loginModal").classList.add("show");
+}
+
+function closeLogin() {
+  $("#loginModal").classList.remove("show");
+  _loginPrompted = false;
+}
+
+function openRegister() {
+  $("#regErr").hidden = true;
+  $("#registerModal").classList.add("show");
+}
+
+function closeRegister() {
+  $("#registerModal").classList.remove("show");
+}
+
+function showLogin() { openLogin(); }
+
+function hideLogin() { closeLogin(); }
 
 async function unlock() {
+  const username = $("#lockUser").value.trim();
   const pass = $("#lockPass").value;
   if (!pass) return;
   $("#btnUnlock").disabled = true;
   try {
-    const d = await api("/login", { method: "POST", json: { password: pass } });
+    const d = await api("/login", { method: "POST", json: { username: username || undefined, password: pass } });
     localStorage.setItem("tg_token", d.token);
+    _loginPrompted = false;
     $("#lockErr").hidden = true;
     hideLogin();
-    toast("Unlocked", "ok");
-    startApp();
+    toast("Logged in", "ok");
+    await afterLogin();
   } catch (e) {
     $("#lockErr").hidden = false;
     toast(e.message, "err");
   } finally {
     $("#btnUnlock").disabled = false;
   }
+}
+
+function renderUserChip() {
+  const chip = $("#userChip");
+  if (!S.me) return;
+  if (S.me.role === "owner") {
+    chip.innerHTML = '<span class="chip-ico">🛡</span><span class="chip-name">Owner</span>';
+  } else {
+    const n = S.me.name || S.me.username || "—";
+    const un = S.me.username ? "@" + S.me.username : "";
+    const sub = [un, S.me.id ? "ID " + S.me.id : ""].filter(Boolean).join(" · ");
+    chip.innerHTML = `<span class="chip-ico">👤</span><span class="chip-name">${esc(n)}</span>` +
+      (sub ? `<span class="chip-id"> (${esc(sub)})</span>` : "");
+  }
+}
+
+async function afterLogin() {
+  const me = await api("/me");
+  S.role = me.role;
+  S.me = me;
+  S.customerMode = me.role === "customer";
+  buildNav();
+  renderUserChip();
+  showAppShell();
+  $("#adminCard").hidden = S.customerMode;
+  $("#buyCard").hidden = !S.customerMode;
+if (S.customerMode) {
+    $("#myHistoryCard").hidden = false;
+    renderBalance();
+    loadValAccountSelect();
+    renderMyHistory();
+    loadShop();
+    setPage("validate");
+  } else {
+    adminRefresh();
+    loadShop();
+    setPage("dashboard");
+  }
+  startRefreshLoop();
+}
+
+function buildNav() {
+  $$(".nav-link").forEach((a) => { a.style.display = ""; });
+}
+
+function defaultPage() {
+  return "dashboard";
+}
+
+async function loadValAccountSelect() {
+  let accs = [];
+  try {
+    if (S.customerMode) {
+      accs = (await api("/accounts/public")).accounts || [];
+    } else {
+      accs = (await api("/accounts")).accounts || [];
+    }
+  } catch { /* keep empty */ }
+  const active = accs.filter((a) => a.status === "active");
+  $("#valAccount").innerHTML = active.length
+    ? `<option value="0">All accounts (` + active.length + `)</option>` + active.map((a) => `<option value="${a.id}">${esc(a.phone)}${a.username ? " @" + a.username : ""}${a.spam_limited ? " (⚑ blocked)" : ""}</option>`).join("")
+    : `<option value="">— no active account —</option>`;
+}
+
+function startRefreshLoop() {
+  if (S._refreshTimer) return;
+  refresh();
+  S._refreshTimer = setInterval(refresh, 5000);
 }
 
 function fmtTime(t) {
@@ -105,6 +213,11 @@ const S = {
   detailCid: null,
   selectedAccounts: new Set(),
   busy: false,
+  role: "owner",
+  me: null,
+  customerMode: false,
+  pendingAccountId: null,
+  _refreshTimer: null,
 };
 
 /* ================= navigation ================= */
@@ -114,6 +227,7 @@ function setPage(name) {
   $("#page-" + name).classList.add("active");
   $$(".nav-link").forEach((a) => a.classList.toggle("active", a.dataset.page === name));
   $("#mainNav").classList.remove("open");
+  if (name === "validate") loadValAccountSelect();
   window.scrollTo(0, 0);
   refresh();
 }
@@ -155,10 +269,23 @@ async function renderDashboard() {
 
 /* ================= accounts ================= */
 async function loadAccounts() {
-  try { S.accounts = (await api("/accounts")).accounts; } catch { return; }
+  try {
+    const [acc, keys] = await Promise.all([
+      api("/accounts").catch(() => ({ accounts: [] })),
+      api("/accounts/api-keys").catch(() => ({ api_keys: [] })),
+    ]);
+    S.accounts = acc.accounts || [];
+    S.apiKeyOpts = keys.api_keys || [];
+  } catch { return; }
   renderAccountList();
   renderScrapeAccountSelect();
   renderCampaignAccountChips();
+}
+
+function apiKeyOptions(acc) {
+  const set = (S.apiKeyOpts && S.apiKeyOpts.length) ? S.apiKeyOpts : [];
+  return `<option value="0">Default (config)</option>` +
+    set.map((k) => `<option value="${k.id}" ${acc.api_key_id === k.id ? "selected" : ""}>${esc(k.label || "App " + k.api_id)} (${k.api_id})</option>`).join("");
 }
 
 function renderAccountList() {
@@ -168,10 +295,15 @@ function renderAccountList() {
   list.innerHTML = S.accounts.map((a) => `
     <div class="row-item">
       <div class="main">
-        <div class="title">${esc(a.name || "—")} ${badge(a.status)}</div>
-        <div class="sub">${esc(a.phone || "")}${a.username ? " · @" + esc(a.username) : ""}</div>
+        <div class="title">${esc(a.name || "—")} ${badge(a.status)} ${a.spam_limited ? '<span class="badge red">⚠ SPAM</span>' : ""} ${a.api_limited ? '<span class="badge red">KEY LIMITED</span>' : ""}</div>
+        <div class="sub">${esc(a.phone || "")}${a.username ? " · @" + esc(a.username) : ""}${a.spam_since ? ` <span class="muted">· flagged ${esc(a.spam_since)}</span>` : ""}</div>
+      </div>
+      <div class="api-row">
+        <span class="label">API</span>
+        <select class="input sel sm" data-accapi="${a.id}">${apiKeyOptions(a)}</select>
       </div>
       <div class="row-actions">
+        ${a.spam_limited ? `<button class="btn ghost sm" data-unflag="${a.id}">Clear spam flag</button>` : ""}
         ${a.status === "active" ? `<button class="btn ghost sm" data-del="${a.id}">Log out</button>` : ""}
       </div>
     </div>`).join("");
@@ -179,12 +311,28 @@ function renderAccountList() {
     try { await api("/accounts/" + b.dataset.del, { method: "DELETE" }); toast("Account logged out", "ok"); await loadAccounts(); }
     catch (e) { toast(e.message, "err"); }
   }));
+  $$("#accountsList [data-unflag]").forEach((b) => b.addEventListener("click", async () => {
+    try { await api("/accounts/" + b.dataset.unflag + "/unflag", { method: "POST" }); toast("Spam flag cleared", "ok"); await loadAccounts(); }
+    catch (e) { toast(e.message, "err"); }
+  }));
+  $$("#accountsList [data-accapi]").forEach((s) => s.addEventListener("change", async () => {
+    const kid = Number(s.value) || null;
+    try {
+      await api("/accounts/" + s.dataset.accapi + "/api-key", {
+        method: "PATCH", body: { api_key_id: kid },
+      });
+      toast("API key updated — re-login the account to apply", "ok");
+    } catch (e) { toast(e.message, "err"); await loadAccounts(); }
+  }));
 }
 
 function renderScrapeAccountSelect() {
   const active = S.accounts.filter((a) => a.status === "active");
   $("#scrapeAccount").innerHTML = active.length
     ? active.map((a) => `<option value="${a.id}">${esc(a.phone)}${a.username ? " @" + a.username : ""}</option>`).join("")
+    : `<option value="">— add an active account first —</option>`;
+  $("#valAccount").innerHTML = active.length
+    ? `<option value="0">All accounts (` + active.length + `)</option>` + active.map((a) => `<option value="${a.id}">${esc(a.phone)}${a.username ? " @" + a.username : ""}</option>`).join("")
     : `<option value="">— add an active account first —</option>`;
 }
 
@@ -212,9 +360,12 @@ async function sendCode() {
   if (!phone) return toast("Enter your phone number", "err");
   S.busy = true; $("#btnSendCode").disabled = true;
   try {
-    await api("/accounts/send-code", { method: "POST", json: { phone } });
+    const d = await api("/accounts/send-code", { method: "POST", json: { phone } });
+    S.pendingAccountId = d.account_id;
     $("#codeBox").hidden = false;
     $("#needPassHint").hidden = true;
+    $("#codePhoneHint").textContent = `Code sent to ${phone} — paste it below.`;
+    $("#codePhoneHint").hidden = false;
     $("#btnSendCode").textContent = "Code sent! Re-send";
     toast("Code sent! Check your Telegram", "ok");
   } catch (e) { toast(e.message, "err"); }
@@ -228,15 +379,169 @@ async function verify() {
     const code = $("#accCode").value.trim();
     const password = $("#accPass").value;
     if (!code) return toast("Enter the code", "err");
-    const a = list[0]; if (!a) return toast("No account in progress. Send a code first.", "err");
-    if (a.status !== "waiting_code") return toast("No account waiting for a code. Send a code first.", "err");
+    let a = list.find((x) => x.id === S.pendingAccountId && x.status === "waiting_code");
+    if (!a) a = list.find((x) => x.status === "waiting_code");
+    if (!a) return toast("No account waiting for a code. Send a code first.", "err");
     const res = await api("/accounts/verify", { method: "POST", json: { account_id: a.id, code, password: password || undefined } });
     if (res.need_password) { $("#needPassHint").hidden = false; return; }
     toast("Account logged in!", "ok");
-    $("#codeBox").hidden = true; $("#accPhone").value = ""; $("#accCode").value = ""; $("#accPass").value = ""; $("#btnSendCode").textContent = "Send code";
+    $("#codeBox").hidden = true; $("#accPhone").value = ""; $("#accCode").value = ""; $("#accPass").value = ""; $("#btnSendCode").textContent = "Send code"; $("#codePhoneHint").hidden = true;
+    S.pendingAccountId = null;
     await loadAccounts();
   } catch (e) { toast(e.message, "err"); }
   finally { S.busy = false; }
+}
+
+/* ================= validate numbers ================= */
+async function validateNumbers() {
+  const accountId = $("#valAccount").value;
+  const nums = $("#valNumbers").value.split(/\r?\n/).map((s) => s.trim()).filter(Boolean);
+  if (!accountId) return toast("Add & verify an account first", "err");
+  if (!nums.length) return toast("Enter at least one number", "err");
+  S.busy = true; $("#btnValidate").disabled = true;
+  $("#btnValidate").innerHTML = '<span class="spin"></span> Checking...';
+  $("#btnStopVal").style.display = "";
+  window._valResults = [];
+  _valAbort = new AbortController();
+  $("#valResultsCard").hidden = false;
+  $("#valCount").textContent = `0/${nums.length} registered`;
+  $("#valSummary").innerHTML = [
+    ["Found", 0], ["Not found", 0], ["Online now", 0],
+  ].map(([l, n]) => `<div class="tile"><b>${n}</b>${l}</div>`).join("");
+  $("#valBody").innerHTML = "";
+  const token = localStorage.getItem("tg_token");
+  try {
+    const res = await fetch("/api/validate", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        ...(token ? { Authorization: "Bearer " + token } : {}),
+      },
+      body: JSON.stringify({ account_id: Number(accountId), numbers: nums }),
+      signal: _valAbort.signal,
+    });
+    if (!res.ok) {
+      let msg = "Request failed (" + res.status + ")";
+      try { const d = await res.json(); if (d && d.detail) msg = d.detail; } catch { /* ignore */ }
+      if (res.status === 401) showLoginOnce();
+      const err = new Error(msg);
+      err.status = res.status;
+      throw err;
+    }
+    const reader = res.body.getReader();
+    const dec = new TextDecoder();
+    let buf = ""; let done = false;
+    while (!done) {
+      const chunk = await reader.read();
+      done = chunk.done;
+      buf += dec.decode(chunk.value || new Uint8Array(0), { stream: !done });
+      let idx;
+      while ((idx = buf.indexOf("\n")) >= 0) {
+        const line = buf.slice(0, idx).trim();
+        buf = buf.slice(idx + 1);
+        if (!line) continue;
+        let msg;
+        try { msg = JSON.parse(line); } catch { continue; }
+        if (msg.type === "result") {
+          window._valResults.push(msg.result);
+          renderSingleValResult(msg.result, nums.length);
+        } else if (msg.type === "done") {
+          if (msg.results && msg.results.length !== window._valResults.length) {
+            window._valResults = msg.results;
+            renderValResults(msg.results);
+          }
+          if (msg.balance_after !== null && msg.balance_after !== undefined) {
+            if (S.me) { S.me.credits = msg.balance_after; renderBalance(); }
+            try { renderMyHistory(); } catch { /* noop */ }
+          }
+          toast(`Checked ${window._valResults.length} numbers`, "ok");
+        }
+      }
+    }
+  } catch (e) {
+    if (e.name === "AbortError") {
+      toast(`Stopped — ${window._valResults.length}/${nums.length} checked`, "err");
+      renderValResults(window._valResults);
+    } else if (!e.status) {
+      toast(e.message, "err");
+    }
+  } finally {
+    _valAbort = null;
+    S.busy = false;
+    $("#btnValidate").disabled = false;
+    $("#btnValidate").textContent = "Check";
+    $("#btnStopVal").style.display = "none";
+  }
+}
+
+function stopValidate() {
+  if (_valAbort) _valAbort.abort();
+}
+
+function renderSingleValResult(r, total) {
+  const ok = window._valResults.filter((x) => x.registered);
+  const online = ok.filter((x) => x.online);
+  $("#valCount").textContent = `${ok.length}/${total} registered`;
+  $("#valSummary").innerHTML = [
+    ["Found", ok.length],
+    ["Not found", window._valResults.length - ok.length],
+    ["Online now", online.length],
+  ].map(([l, n]) => `<div class="tile"><b>${n}</b>${l}</div>`).join("");
+  $("#valBody").insertAdjacentHTML("beforeend", valRowHtml(r));
+}
+
+function valRowHtml(r) {
+  if (!r.registered) {
+    const err = r.error ? `<span class="muted">${esc(r.error)}</span>` : "not on Telegram";
+    return `<tr>
+      <td>${esc(r.number)}</td>
+      <td><span class="badge red">No</span></td>
+      <td colspan="3">${err}</td>
+    </tr>`;
+  }
+  const name = esc([r.first_name, r.last_name].filter(Boolean).join(" ") || "—");
+  const uname = r.username ? "@" + esc(r.username) : "—";
+  const seen = r.online
+    ? `<span class="badge green">● online</span>`
+    : esc(r.last_seen || "Unknown");
+  return `<tr>
+    <td>${esc(r.number)}</td>
+    <td><span class="badge green">Yes</span></td>
+    <td>${name} <span class="muted sm">${esc(r.user_id || "")}</span></td>
+    <td>${uname}</td>
+    <td>${seen}</td>
+  </tr>`;
+}
+
+function renderValResults(results) {
+  const ok = results.filter((r) => r.registered);
+  $("#valResultsCard").hidden = false;
+  $("#valCount").textContent = `${ok.length}/${results.length} registered`;
+  $("#valSummary").innerHTML = [
+    ["Found", ok.length],
+    ["Not found", results.length - ok.length],
+    ["Online now", ok.filter((r) => r.online).length],
+  ].map(([l, n]) => `<div class="tile"><b>${n}</b>${l}</div>`).join("");
+  window._valResults = results;
+  $("#valBody").innerHTML = results.map(valRowHtml).join("");
+}
+
+function exportValResults() {
+  const res = window._valResults || [];
+  if (!res.length) return toast("Nothing to export", "err");
+  let csv = "number,registered,user_id,username,first_name,last_name,online,last_seen\n";
+  for (const r of res) {
+    csv += [
+      r.number || "", r.registered ? "yes" : "no", r.user_id || "", r.username || "",
+      r.first_name || "", r.last_name || "", r.online ? "yes" : "no", r.last_seen || "",
+    ].map((v) => `"${String(v).replace(/"/g, '""')}"`).join(",") + "\n";
+  }
+  const blob = new Blob(["\uFEFF" + csv], { type: "text/csv" });
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(blob);
+  a.download = "validate_results.csv";
+  a.click();
+  URL.revokeObjectURL(a.href);
 }
 
 /* ================= scrape jobs ================= */
@@ -403,15 +708,28 @@ function campRow(c) {
     <div class="row-item">
       <div class="main" style="flex:1;min-width:200px">
         <div class="title">${esc(c.name)} ${badge(c.status)}</div>
-        <div class="sub">${c.sent} sent · ${c.failed} failed · ${Math.max(0, total - done)} pending</div>
+        <div class="sub">${c.sent} sent · ${c.failed} failed · ${Math.max(0, total - done)} pending · delay ${c.min_delay}-${c.max_delay}s</div>
         <div class="progress-outer"><div class="progress-inner" style="width:${pct}%"></div></div>
       </div>
       <div class="row-actions">
         <button class="btn ghost sm" data-logs="${c.id}">Logs</button>
         ${c.status !== "running" && c.status !== "finished" && c.sent + c.failed < total ? `<button class="btn primary sm" data-start="${c.id}">Start</button>` : ""}
         ${running ? `<button class="btn danger sm" data-stop="${c.id}">Stop</button>` : ""}
+        <button class="btn ghost sm" data-del="${c.id}" title="Delete campaign + logs">Del</button>
       </div>
     </div>`;
+}
+
+function bindCampaignDelete() {
+  $$("#campaignsList [data-del]").forEach((b) => b.addEventListener("click", async () => {
+    if (!confirm("Delete this campaign and all its logs? This cannot be undone.")) return;
+    try {
+      await api("/campaigns/" + b.dataset.del, { method: "DELETE" });
+      toast("Campaign deleted", "ok");
+      if (S.detailCid === Number(b.dataset.del)) { S.detailCid = null; $("#campaignDetailCard").hidden = true; }
+      await renderCampaigns();
+    } catch (e) { toast(e.message, "err"); }
+  }));
 }
 
 async function renderCampaigns() {
@@ -429,6 +747,7 @@ function bindCampaignControls() {
     try {
       await api("/campaigns/" + b.dataset.start + "/start", { method: "POST" });
       toast("Campaign started", "ok"); await renderCampaigns();
+      refreshBalance();
       S.detailCid = Number(b.dataset.start); openDetail();
     } catch (e) { toast(e.message, "err"); }
   }));
@@ -439,6 +758,7 @@ function bindCampaignControls() {
   $$("#campaignsList [data-logs]").forEach((b) => b.addEventListener("click", async () => {
     S.detailCid = Number(b.dataset.logs); openDetail();
   }));
+  bindCampaignDelete();
 }
 
 async function openDetail() {
@@ -447,11 +767,27 @@ async function openDetail() {
   await renderCampaignDetail();
 }
 
+async function setCampaignDelay() {
+  if (!S.detailCid) return toast("Open a campaign first", "err");
+  const min = Number($("#cpMinDelay").value);
+  const max = Number($("#cpMaxDelay").value);
+  if (!(min > 0) || !(max >= min)) return toast("Invalid delay (min 1s, min <= max)", "err");
+  try {
+    await api("/campaigns/" + S.detailCid + "/delay", { method: "PATCH", json: { min_delay: min, max_delay: max } });
+    toast("Delay updated — applies immediately", "ok");
+    const row = (S.campaigns || []).find((x) => x.id === S.detailCid);
+    if (row) { row.min_delay = min; row.max_delay = max; }
+    await renderCampaigns();
+  } catch (e) { toast(e.message, "err"); }
+}
+
 async function renderCampaignDetail(c) {
   try {
     if (!c) c = (await api("/campaigns/" + S.detailCid)).campaign;
   } catch { return; }
   $("#cpDetailTitle").textContent = c.name;
+  $("#cpMinDelay").value = c.min_delay ?? 30;
+  $("#cpMaxDelay").value = c.max_delay ?? 90;
   const tc = c.target_counts || {};
   $("#cpDetailStats").innerHTML = [
     ["Total", c.total || 0],
@@ -520,16 +856,17 @@ async function createCampaign() {
 /* ================= polling / refresh ================= */
 let lastJobs = "", lastCamps = "", lastAccs = "";
 async function refresh() {
+  if (S.customerMode) return;
   try {
-    const jobs = (await api("/scrape/jobs")).jobs.map((j) => j.id + ":" + j.status + ":" + j.member_count).join(",");
-    const camps = (await api("/campaigns")).campaigns.map((c) => c.id + ":" + c.status + ":" + (c.sent || 0) + ":" + (c.failed || 0)).join(",");
-    const accs = (await api("/accounts")).accounts.map((a) => a.id + ":" + a.status).join(",");
+    const jobs = (await api("/scrape/jobs", { silent: true })).jobs.map((j) => j.id + ":" + j.status + ":" + j.member_count).join(",");
+    const camps = (await api("/campaigns", { silent: true })).campaigns.map((c) => c.id + ":" + c.status + ":" + (c.sent || 0) + ":" + (c.failed || 0)).join(",");
+    const accs = (await api("/accounts", { silent: true })).accounts.map((a) => a.id + ":" + a.status).join(",");
     const jobsChanged = jobs !== lastJobs;
     const campsChanged = camps !== lastCamps;
     const accsChanged = accs !== lastAccs;
     lastJobs = jobs; lastCamps = camps; lastAccs = accs;
 
-    if (jobsChanged) { S.jobs = (await api("/scrape/jobs")).jobs; renderScrapeJobs(); renderSrcJobSelect(); }
+    if (jobsChanged) { S.jobs = (await api("/scrape/jobs", { silent: true })).jobs; renderScrapeJobs(); renderSrcJobSelect(); }
     if (accsChanged) { await loadAccounts(); }
     if (S.page === "dashboard") { await renderDashboard(); }
     if (S.page === "send" && (campsChanged || camps)) { await renderCampaigns(); }
@@ -537,7 +874,404 @@ async function refresh() {
     if (S.selJobId && $("#membersCard") && !$("#membersCard").hidden && jobsChanged) {
       // members refresh kept manual via filters
     }
-  } catch { /* transient */ }
+  } catch (e) {
+    if (e && e.status === 401) { clearInterval(S._refreshTimer); S._refreshTimer = null; }
+  }
+}
+
+/* ================= customer buy credits ================= */
+function renderBalance() {
+  const n = Math.floor(S.me && S.me.credits || 0);
+  $("#balChip").textContent = n.toLocaleString() + " credits";
+}
+
+function renderPricing() {
+  const body = $("#pricingBody");
+  const pr = (shopData && shopData.pricing) || [];
+  const unitMap = { "numbers checked": "number", "messages sent": "message", "members scraped": "member" };
+  const unitPlural = { "numbers checked": "numbers", "messages sent": "messages", "members scraped": "members" };
+  body.innerHTML = pr.length
+    ? pr.map((p) => {
+        const rate = (p.credits_per_unit || 0);
+        const rateTxt = (rate % 1 ? rate.toFixed(4).replace(/0+$/, "").replace(/\.$/, "") : rate) +
+          " credit" + (rate === 1 ? "" : "s") + " / " + (unitMap[p.unit] || p.unit);
+        return `<tr>
+          <td>${esc(p.label)}</td>
+          <td class="sm">${rateTxt}</td>
+          <td class="sm">$${p.usd} / ${p.per.toLocaleString()} ${unitPlural[p.unit] || p.unit}</td>
+          <td class="sm">${Math.round(p.credits_for_per).toLocaleString()} credits</td>
+        </tr>`;
+      }).join("")
+    : `<tr><td colspan="4" class="muted">Pricing not loaded.</td></tr>`;
+}
+
+async function loadShop() {
+  try {
+    shopData = await api("/shop");
+  } catch (e) { toast(e.message, "err"); return; }
+  renderPricing();
+  const sel = $("#packSel");
+  sel.innerHTML = (shopData.packs || []).map((p) =>
+    `<option value="${p.usd}" data-credits="${p.credits}">${p.credits.toLocaleString()} credits  =  $${p.usd} USDT</option>`).join("");
+  const w = $("#shopWallet");
+  w.textContent = shopData.wallet_configured ? shopData.wallet : "Wallet not configured yet — contact the owner.";
+  w.classList.toggle("muted", !shopData.wallet_configured);
+  $("#btnCopyWallet").disabled = !shopData.wallet_configured;
+}
+
+async function refreshBalance() {
+  if (!S.customerMode) return;
+  try {
+    S.me = await api("/me");
+    renderBalance();
+  } catch { /* ignore */ }
+}
+
+async function copyWallet() {
+  const txt = shopData && shopData.wallet;
+  if (!txt) return toast("No wallet address set", "err");
+  try { await navigator.clipboard.writeText(txt); toast("Wallet copied", "ok"); }
+  catch { $("#shopWallet").select(); document.execCommand("copy"); toast("Wallet copied", "ok"); }
+}
+
+async function verifyPay() {
+  const txid = $("#payTxid").value.trim();
+  if (!txid) return toast("Paste your transaction hash (TXID)", "err");
+  const amount = Number($("#packSel").value || 0);
+  $("#btnVerifyPay").disabled = true;
+  $("#btnVerifyPay").innerHTML = '<span class="spin"></span> Verifying...';
+  try {
+    const d = await api("/pay", { method: "POST", json: { txid } });
+    S.me.credits = d.credits;
+    renderBalance();
+    $("#payTxid").value = "";
+    toast(`Credited ${d.credits_added.toLocaleString()} credits!`, "ok");
+  } catch (e) {
+    toast(e.message, "err");
+  } finally {
+    $("#btnVerifyPay").disabled = false;
+    $("#btnVerifyPay").textContent = "Verify & add credits";
+  }
+}
+
+/* ================= admin ================= */
+async function adminCreateCustomer() {
+  const name = $("#adName").value.trim();
+  const username = $("#adUser").value.trim();
+  const password = $("#adPass").value;
+  if (!username) return toast("Username is required", "err");
+  if (!password) return toast("Password is required", "err");
+  try {
+    await api("/admin/customers", { method: "POST", json: { name: name || undefined, username, password } });
+    $("#adName").value = ""; $("#adUser").value = ""; $("#adPass").value = "";
+    toast("Customer created", "ok");
+    await adminRefresh();
+  } catch (e) { toast(e.message, "err"); }
+}
+
+async function adminAddCredits() {
+  const cid = Number($("#adCredCust").value);
+  const amt = Number($("#adCredAmt").value);
+  if (!cid) return toast("Select a customer", "err");
+  if (!amt || amt < 1) return toast("Enter credits to add", "err");
+  try {
+    const d = await api("/admin/credits", { method: "POST", json: { customer_id: cid, credits: amt } });
+    $("#adCredAmt").value = "";
+    toast(`Added ${amt.toLocaleString()} credits`, "ok");
+    await adminRefresh();
+  } catch (e) { toast(e.message, "err"); }
+}
+
+async function renderMyHistory() {
+  let checks = [], txs = [];
+  try {
+    [checks, txs] = await Promise.all([
+      api("/checks/mine").then((d) => d.checks || []).catch(() => []),
+      api("/transactions/mine").then((d) => d.transactions || []).catch(() => []),
+    ]);
+  } catch { /* ignore */ }
+  $("#myHistCount").textContent = (checks.length ? checks.length + " runs · " : "") +
+    (txs.length ? txs.length + " txns" : "");
+  const cBody = $("#myChecksBody");
+  cBody.innerHTML = checks.length
+    ? checks.map((c) => {
+        const found = (c.results || []).filter((r) => r.registered).length;
+        return `<tr>
+          <td class="sm">${esc(c.created_at || "")}</td>
+          <td class="sm">${esc((c.numbers || []).slice(0, 3).join(", "))}${(c.numbers || []).length > 3 ? ` <span class="muted">+${(c.numbers||[]).length - 3} more</span>` : ""}</td>
+          <td><span class="badge ${found ? "green" : "gray"}">${found}/${(c.numbers || []).length}</span></td>
+          <td class="sm">${Math.floor(c.cost || 0)} credits</td>
+        </tr>`;
+      }).join("")
+    : `<tr><td colspan="4" class="muted">No checks yet.</td></tr>`;
+  const tBody = $("#myTxBody");
+  tBody.innerHTML = txs.length
+    ? txs.map((t) => {
+        const delta = t.type === "buy" || t.type === "admin"
+          ? `+${Math.floor(t.credits || 0)}` : Math.floor(t.credits || 0);
+        return `<tr>
+          <td class="sm">${esc(t.created_at || "")}</td>
+          <td class="sm">${esc(t.type || "")}</td>
+          <td class="sm">${delta}</td>
+          <td class="sm">$${t.usd || 0}</td>
+          <td class="sm mono">${esc((t.txid || "").slice(0, 16))}</td>
+        </tr>`;
+      }).join("")
+    : `<tr><td colspan="5" class="muted">No transactions yet.</td></tr>`;
+}
+
+async function adminLoadData() {
+  let checks = [], txs = [], keys = [], pricing = null, supportBot = "";
+  try {
+    [checks, txs, keys, pricing, supportBot] = await Promise.all([
+      api("/admin/checks").then((d) => d.checks || []).catch(() => []),
+      api("/admin/transactions").then((d) => d.transactions || []).catch(() => []),
+      api("/admin/api-keys").then((d) => d.api_keys || []).catch(() => []),
+      api("/admin/pricing").then((d) => d.pricing || null).catch(() => null),
+      api("/admin/settings").then((d) => (d.settings || {}).support_bot || "").catch(() => ""),
+    ]);
+  } catch { /* ignore */ }
+  $("#adSupportBot").value = supportBot ? "@" + supportBot : "";
+  if (pricing) renderAdminPricing(pricing);
+  const kb = $("#adApiKeysBody");
+  kb.innerHTML = keys.length
+    ? keys.map((k) => `<tr>
+        <td class="sm">${esc(k.label || "App " + k.api_id)} ${k.limited ? '<span class="badge red">LIMITED</span>' : ""}</td>
+        <td class="sm">${esc(String(k.api_id))}</td>
+        <td class="sm mono">${esc(String(k.api_hash).slice(0, 12))}…</td>
+        <td class="sm">${esc(k.created_at || "")}</td>
+        <td>${k.limited ? `<button class="btn ghost sm" data-unlimit="${k.id}">Unflag</button>` : ""}<button class="btn ghost sm" data-adel="${k.id}">Delete</button></td>
+      </tr>`).join("")
+    : `<tr><td colspan="5" class="muted">No API keys yet. Use config.json or add one below.</td></tr>`;
+  $$("#adApiKeysBody [data-adel]").forEach((b) => b.addEventListener("click", async () => {
+    if (!confirm("Delete this API key?")) return;
+    try { await api("/admin/api-keys/" + b.dataset.adel, { method: "DELETE" }); toast("API key deleted", "ok"); adminLoadData(); }
+    catch (e) { toast(e.message, "err"); }
+  }));
+  $$("#adApiKeysBody [data-unlimit]").forEach((b) => b.addEventListener("click", async () => {
+    try { await api("/admin/api-keys/" + b.dataset.unlimit + "/unlimit", { method: "POST" }); toast("API key unflagged", "ok"); adminLoadData(); }
+    catch (e) { toast(e.message, "err"); }
+  }));
+  const cb = $("#adChecksBody");
+  cb.innerHTML = checks.length
+    ? checks.map((c) => `<tr>
+        <td class="sm">${esc(c.customer_name || c.customer_username || "—")}</td>
+        <td class="sm">${esc(c.created_at || "")}</td>
+        <td class="sm">${esc((c.numbers || []).length)} numbers</td>
+        <td><span class="badge ${c.found ? "green" : "gray"}">${c.found}/${(c.numbers || []).length}</span></td>
+        <td class="sm">${Math.floor(c.cost || 0)} cr</td>
+      </tr>`).join("")
+    : `<tr><td colspan="5" class="muted">No checks yet.</td></tr>`;
+  const tb = $("#adTxBody");
+  tb.innerHTML = txs.length
+    ? txs.map((t) => `<tr>
+        <td class="sm">${esc(t.username || "—")}</td>
+        <td class="sm">${esc(t.created_at || "")}</td>
+        <td class="sm">${esc(t.type || "")}</td>
+        <td class="sm">${Math.floor(t.credits || 0)}</td>
+        <td class="sm">$${t.usd || 0}</td>
+        <td class="sm mono">${esc((t.txid || "").slice(0, 16))}</td>
+      </tr>`).join("")
+    : `<tr><td colspan="6" class="muted">No transactions yet.</td></tr>`;
+}
+
+function renderAdminPricing(pr) {
+  const body = $("#adPricingBody");
+  const unitMap = { "numbers checked": "number", "messages sent": "message", "members scraped": "member" };
+  body.innerHTML = Object.entries(pr).map(([svc, p]) => {
+    const rate = (p.usd / 0.003 / p.per);
+    const rateTxt = (rate % 1 ? rate.toFixed(4).replace(/0+$/, "").replace(/\.$/, "") : rate) +
+      " credit" + (rate === 1 ? "" : "s") + " / " + (unitMap[p.unit] || p.unit);
+    return `<tr>
+      <td>${esc(p.label)}<div class="muted sm">${rateTxt}</div></td>
+      <td class="sm">${esc(unitMap[p.unit] || p.unit)}</td>
+      <td><input class="input sm-num" type="number" min="0.01" step="0.5" value="${p.usd}" data-psvc="${svc}" data-pfield="usd" style="width:90px"></td>
+      <td><input class="input sm-num" type="number" min="1" step="100" value="${p.per}" data-psvc="${svc}" data-pfield="per" style="width:110px"></td>
+      <td><button class="btn primary sm" data-psave="${svc}">Save</button></td>
+      <td><button class="btn ghost sm" data-preset="${svc}">Reset</button></td>
+    </tr>`;
+  }).join("") || `<tr><td colspan="6" class="muted">No services configured.</td></tr>`;
+  $$("#adPricingBody [data-psave]").forEach((b) => b.addEventListener("click", async () => {
+    const usd = Number($(`[data-psvc="${b.dataset.psave}"][data-pfield="usd"]`).value);
+    const per = Number($(`[data-psvc="${b.dataset.psave}"][data-pfield="per"]`).value);
+    if (!(usd > 0) || !(per > 0)) return toast("Enter valid price and volume", "err");
+    try {
+      await api("/admin/pricing/" + b.dataset.psave, { method: "PUT", json: { usd, per } });
+      toast("Pricing updated", "ok");
+      await loadShop();
+      adminLoadData();
+    } catch (e) { toast(e.message, "err"); }
+  }));
+  $$("#adPricingBody [data-preset]").forEach((b) => b.addEventListener("click", async () => {
+    try {
+      await api("/admin/pricing/" + b.dataset.preset, { method: "DELETE" });
+      toast("Back to default", "ok");
+      await loadShop();
+      adminLoadData();
+    } catch (e) { toast(e.message, "err"); }
+  }));
+}
+
+async function adminAddApiKey() {
+  const api_id = $("#adApiId").value.trim();
+  const api_hash = $("#adApiHash").value.trim();
+  const label = $("#adApiLabel").value.trim();
+  if (!api_id || !api_hash) return toast("api_id and api_hash are required", "err");
+  try {
+    await api("/admin/api-keys", { method: "POST", body: { api_id: Number(api_id), api_hash, label } });
+    $("#adApiId").value = ""; $("#adApiHash").value = ""; $("#adApiLabel").value = "";
+    toast("API key added", "ok");
+    adminLoadData();
+    loadAccounts();
+  } catch (e) { toast(e.message, "err"); }
+}
+
+async function updateSupportButton() {
+  const btn = $("#supportBtn");
+  try {
+    const d = await api("/support", { silent: true });
+    const u = (d && d.username) || "";
+    if (u) { btn.href = "https://t.me/" + u; btn.hidden = false; }
+    else btn.hidden = true;
+  } catch { btn.hidden = true; }
+}
+
+async function saveSupport() {
+  const val = $("#adSupportBot").value.trim().replace(/^@/, "");
+  try {
+    const d = await api("/admin/settings/support", { method: "PUT", json: { username: val } });
+    const u = (d.settings || {}).support_bot || "";
+    $("#adSupportBot").value = u ? "@" + u : "";
+    toast(u ? "Support bot saved" : "Support bot removed", "ok");
+    await updateSupportButton();
+  } catch (e) { toast(e.message, "err"); }
+}
+
+async function adminRefresh() {
+  let d;
+  try { d = await api("/admin/customers"); }
+  catch (e) { toast(e.message, "err"); return; }
+  const custs = d.customers || [];
+  const body = $("#adCustomersBody");
+  body.innerHTML = custs.length
+    ? custs.map((c) => `
+      <tr>
+        <td>${esc(c.name || "—")}</td>
+        <td>@${esc(c.username)}</td>
+        <td>${Math.floor(c.credits || 0).toLocaleString()} <button class="btn ghost sm" data-bump="${c.id}">+1000</button></td>
+        <td class="ta-r"><button class="btn ghost sm" data-del="${c.id}">Delete</button></td>
+      </tr>`).join("")
+    : `<tr><td colspan="4" class="muted">No customers yet.</td></tr>`;
+  $$("#adCustomersBody [data-bump]").forEach((b) => b.addEventListener("click", async () => {
+    try {
+      await api("/admin/credits", { method: "POST", json: { customer_id: Number(b.dataset.bump), credits: 1000 } });
+      toast("+1000 credits", "ok");
+      await adminRefresh();
+    } catch (e) { toast(e.message, "err"); }
+  }));
+  $$("#adCustomersBody [data-del]").forEach((b) => b.addEventListener("click", async () => {
+    if (!confirm("Delete this customer?")) return;
+    try {
+      await api("/admin/customers/" + b.dataset.del, { method: "DELETE" });
+      toast("Customer deleted", "ok");
+      await adminRefresh();
+    } catch (e) { toast(e.message, "err"); }
+  }));
+  const sel = $("#adCredCust");
+  sel.innerHTML = custs.map((c) => `<option value="${c.id}">@${esc(c.username)} (${Math.floor(c.credits || 0).toLocaleString()})</option>`).join("");
+  adminLoadData();
+}
+
+async function logout() {
+  try { await api("/logout", { method: "POST" }); } catch { /* token may be gone */ }
+  localStorage.removeItem("tg_token");
+  if (S._refreshTimer) { clearInterval(S._refreshTimer); S._refreshTimer = null; }
+  location.reload();
+}
+
+async function registerUser() {
+  const name = $("#regName").value.trim();
+  const username = $("#regUser").value.trim();
+  const password = $("#regPass").value;
+  const err = $("#regErr");
+  err.hidden = true;
+  if (username.length < 3) { err.textContent = "Username must be at least 3 characters"; err.hidden = false; return; }
+  if (password.length < 4) { err.textContent = "Password must be at least 4 characters"; err.hidden = false; return; }
+  $("#btnRegister").disabled = true;
+  try {
+    await api("/register", { method: "POST", json: { name: name || undefined, username, password } });
+    toast("Account created! Now login.", "ok");
+    closeRegister();
+    $("#lockUser").value = username;
+    $("#lockPass").value = "";
+    openLogin();
+  } catch (e) {
+    err.textContent = e.message;
+    err.hidden = false;
+  } finally {
+    $("#btnRegister").disabled = false;
+  }
+}
+
+async function loadLandingPacks() {
+  let d;
+  try { d = await api("/shop"); }
+  catch {
+    $("#landPacks").innerHTML = '<div class="muted">Packs unavailable</div>';
+    const lp = $("#landPricing");
+    if (lp) lp.innerHTML = '<tr><td colspan="3" class="muted">Pricing unavailable</td></tr>';
+    return;
+  }
+  const pr = d.pricing || [];
+  const lp = $("#landPricing");
+  if (lp) {
+    const unitMap = { "numbers checked": "number", "messages sent": "message", "members scraped": "member" };
+    const unitPlural = { "numbers checked": "numbers", "messages sent": "messages", "members scraped": "members" };
+    lp.innerHTML = pr.length
+      ? pr.map((p) => {
+          const rate = (p.credits_per_unit || 0);
+          const rateTxt = (rate % 1 ? rate.toFixed(4).replace(/0+$/, "").replace(/\.$/, "") : rate) +
+            " credit" + (rate === 1 ? "" : "s") + " / " + (unitMap[p.unit] || p.unit);
+          return `<tr>
+            <td>${esc(p.label)}</td>
+            <td class="sm">${rateTxt}</td>
+            <td class="sm">$${p.usd} / ${p.per.toLocaleString()} ${unitPlural[p.unit] || p.unit}</td>
+          </tr>`;
+        }).join("")
+      : '<tr><td colspan="3" class="muted">No services yet.</td></tr>';
+  }
+  const packs = d.packs || [];
+  if (!packs.length) { $("#landPacks").innerHTML = '<div class="muted">Pricing coming soon.</div>'; return; }
+  const hot = Math.floor(packs.length / 2);
+  $("#landPacks").innerHTML = packs.map((p, i) => `
+      <div class="pack ${i === hot ? "hot" : ""}">
+        ${i === hot ? '<div class="pack-tag">MOST POPULAR</div>' : ""}
+        <div class="credits">${p.credits.toLocaleString()}</div>
+        <div class="usd">$${p.usd} USDT</div>
+        <div class="per">credits. Use for checks, sends &amp; scrapes</div>
+      </div>`).join("");
+}
+
+function openForgot() {
+  $("#btnUnlock").hidden = true;
+  $("#btnForgot").hidden = true;
+  $("#forgotBox").hidden = false;
+  $("#forgotUser").focus();
+}
+
+function cancelForgot() {
+  $("#btnUnlock").hidden = false;
+  $("#btnForgot").hidden = false;
+  $("#forgotBox").hidden = true;
+}
+
+async function sendForgot() {
+  const u = $("#forgotUser").value.trim();
+  try {
+    const d = await api("/forgot-password", { method: "POST", json: { username: u } });
+    toast(d.msg || "Password sent", "ok");
+    cancelForgot();
+  } catch (e) { toast(e.message, "err"); }
 }
 
 function init() {
@@ -548,23 +1282,44 @@ function init() {
   $("#btnStartScrape").addEventListener("click", startScrape);
   $("#btnCreateCampaign").addEventListener("click", createCampaign);
   $("#btnCloseDetail").addEventListener("click", () => { S.detailCid = null; $("#campaignDetailCard").hidden = true; });
+  $("#btnSetDelay").addEventListener("click", setCampaignDelay);
   $("#btnUnlock").addEventListener("click", unlock);
+  $("#btnLogout").addEventListener("click", logout);
+  ["btnNavLogin", "btnHeroLogin"].forEach((id) => $("#" + id).addEventListener("click", openLogin));
+  ["btnNavRegister", "btnHeroRegister", "btnFootRegister"].forEach((id) => $("#" + id).addEventListener("click", openRegister));
+  $("#btnCloseLogin").addEventListener("click", closeLogin);
+  $("#btnCloseReg").addEventListener("click", closeRegister);
+  $("#btnRegister").addEventListener("click", registerUser);
+  $("#gotoRegister").addEventListener("click", (e) => { e.preventDefault(); closeLogin(); openRegister(); });
+  $("#gotoLogin").addEventListener("click", (e) => { e.preventDefault(); closeRegister(); openLogin(); });
+  $("#btnForgot").addEventListener("click", (e) => { e.preventDefault(); openForgot(); });
+  $("#btnCancelForgot").addEventListener("click", (e) => { e.preventDefault(); cancelForgot(); });
+  $("#btnSendForgot").addEventListener("click", sendForgot);
+  $("#forgotUser").addEventListener("keydown", (e) => { if (e.key === "Enter") sendForgot(); });
+  $("#regUser").addEventListener("keydown", (e) => { if (e.key === "Enter") $("#regPass").focus(); });
+  $("#regPass").addEventListener("keydown", (e) => { if (e.key === "Enter") registerUser(); });
   $("#lockPass").addEventListener("keydown", (e) => { if (e.key === "Enter") unlock(); });
+  $("#lockUser").addEventListener("keydown", (e) => { if (e.key === "Enter") $("#lockPass").focus(); });
+  $("#btnValidate").addEventListener("click", validateNumbers);
+  $("#btnStopVal").addEventListener("click", stopValidate);
+  $("#btnValExport").addEventListener("click", exportValResults);
+  $("#btnCopyWallet").addEventListener("click", copyWallet);
+  $("#btnVerifyPay").addEventListener("click", verifyPay);
+  $("#btnAddCustomer").addEventListener("click", adminCreateCustomer);
+  $("#btnAddCredits").addEventListener("click", adminAddCredits);
+  $("#btnAddApiKey").addEventListener("click", adminAddApiKey);
+  $("#btnSaveSupport").addEventListener("click", saveSupport);
+  $("#btnRefreshAdmin").addEventListener("click", adminRefresh);
   ["cpFUsername", "cpFPhone", "cpFNoBot"].forEach((id) => $("#" + id).addEventListener("change", (e) => {
     S.campFilters[id === "cpFUsername" ? "has_username" : id === "cpFPhone" ? "has_phone" : "exclude_bots"] = e.target.checked;
   }));
   $("#cpFSearch").addEventListener("input", () => { S.campFilters.search = $("#cpFSearch").value; });
 
-  api("/auth/check").then(() => {
-    hideLogin();
-    startApp();
-  }).catch(() => showLogin());
-}
+  updateSupportButton();
 
-function startApp() {
-  setPage("dashboard");
-  refresh();
-  setInterval(refresh, 3500);
+  api("/auth/check", { silent: true }).then(() => {
+    afterLogin();
+  }).catch(() => showLanding());
 }
 
 document.addEventListener("DOMContentLoaded", init);
