@@ -50,6 +50,15 @@ async def scrape_job(job_id: int, account_id: int, group_input: str):
 
     db.update_job(job_id, status="done", total=count, group_title=title,
                   group_username=username, finished_at=db._now())
+    if count:
+        job = db.get_job(job_id)
+        cost, shortfall = db.settle_service(job.get("customer_id"), "scrape", count,
+                                            ref=f"job{job_id}")
+        if shortfall > 0:
+            db.update_job(job_id,
+                          error=f"Credit shortfall: charged {count} members, "
+                                f"{int(shortfall):,} credits still owed ($"
+                                f"{round(shortfall * 0.003, 2)}). Top up credits.")
 
 
 def start_scrape(job_id: int, account_id: int, group_input: str):

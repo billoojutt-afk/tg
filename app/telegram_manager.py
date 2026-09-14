@@ -26,6 +26,26 @@ def normalize_phone(phone: str) -> str:
     return phone
 
 
+def resolve_api_creds(api_key_id) -> tuple:
+    """Return (api_id, api_hash). Prefers a stored healthy DB key, falls back to config."""
+    if api_key_id:
+        k = db.get_api_key(api_key_id)
+        if k and not k.get("limited"):
+            return int(k["api_id"]), k["api_hash"]
+    if bool(API_ID and API_HASH):
+        return API_ID, API_HASH
+    for k in db.list_api_keys():
+        if not k.get("limited"):
+            return int(k["api_id"]), k["api_hash"]
+    return API_ID, API_HASH
+
+
+def api_creds_available() -> bool:
+    if bool(API_ID and API_HASH):
+        return True
+    return db.api_key_count() > 0
+
+
 class TelegramManager:
     def __init__(self, api_id=API_ID, api_hash=API_HASH):
         self.api_id = api_id
@@ -33,9 +53,12 @@ class TelegramManager:
         self._pending = {}   # account_id -> TelegramClient (mid-login)
         self._clients = {}   # account_id -> TelegramClient (logged in)
 
-    async def send_login_code(self, account_id: int, phone: str) -> str:
+    async def send_login_code(self, account_id: int, phone: str,
+                              api_id=None, api_hash=None) -> str:
         phone = normalize_phone(phone)
-        client = TelegramClient(StringSession(), self.api_id, self.api_hash)
+        api_id = api_id or self.api_id
+        api_hash = api_hash or self.api_hash
+        client = TelegramClient(StringSession(), api_id, api_hash)
         await client.connect()
         try:
             res = await client.send_code_request(phone)
@@ -86,8 +109,9 @@ class TelegramManager:
         if client is None:
             if not account.get("session_string"):
                 raise LoginError(f"Account {account['phone']} is not logged in")
+            api_id, api_hash = resolve_api_creds(account.get("api_key_id"))
             client = TelegramClient(StringSession(account["session_string"]),
-                                    self.api_id, self.api_hash)
+                                    api_id, api_hash)
             try:
                 await client.connect()
             except OSError:

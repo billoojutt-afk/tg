@@ -1,12 +1,18 @@
 import io
 import csv
 
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import Response, StreamingResponse
 
 from .. import database as db
+from ..security import require_perm
 
 router = APIRouter(prefix="/api/members", tags=["members"])
+
+
+def _own(job, user: dict):
+    if user.get("role") == "customer" and job.get("customer_id") != user["customer_id"]:
+        raise HTTPException(403, "Not your scrape job")
 
 
 def _filters(has_username: str = "", has_phone: str = "", exclude_bots: str = "",
@@ -26,10 +32,12 @@ async def get_members(job_id: int = Query(...),
                       exclude_bots: str = "",
                       search: str = "",
                       limit: int = 100,
-                      offset: int = 0):
+                      offset: int = 0,
+                      user: dict = Depends(require_perm("scrape"))):
     job = db.get_job(job_id)
     if not job:
         raise HTTPException(404, "Job not found")
+    _own(job, user)
     f = _filters(has_username, has_phone, exclude_bots, search)
     result = db.query_members(job_id, f, min(max(limit, 1), 500), max(offset, 0))
     result["job_total"] = db.count_members(job_id)
@@ -41,10 +49,12 @@ async def export_csv(job_id: int = Query(...),
                      has_username: str = "",
                      has_phone: str = "",
                      exclude_bots: str = "",
-                     search: str = ""):
+                     search: str = "",
+                     user: dict = Depends(require_perm("scrape"))):
     job = db.get_job(job_id)
     if not job:
         raise HTTPException(404, "Job not found")
+    _own(job, user)
     f = _filters(has_username, has_phone, exclude_bots, search)
     rows = db.all_members(job_id, f)
     buf = io.StringIO()

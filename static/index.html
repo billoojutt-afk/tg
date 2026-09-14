@@ -4,19 +4,30 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
   <meta name="theme-color" content="#0f172a">
-  <title>TG Bulk Sender</title>
-  <link rel="stylesheet" href="css/style.css">
+  <title>Wolf TG — Telegram Bulk Sender</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Poppins:wght@600;700;800;900&display=swap">
+  <link rel="stylesheet" href="css/style.css?v=10">
 </head>
 <body>
 
+<div id="bgFX" aria-hidden="true"><span class="blob b1"></span><span class="blob b2"></span><span class="blob b3"></span><span class="blob b4"></span></div>
+
+<div id="appShell" hidden>
+
 <header class="topbar">
-  <div class="brand"><span class="brand-icon">✈</span> TG<span class="brand-accent">Bulk</span></div>
+  <div class="brand"><span class="brand-icon"><img src="logo.svg" alt="WOLF" width="22" height="22"></span>Wolf TG</div>
   <nav class="main-nav" id="mainNav">
-    <a href="#" data-page="dashboard" class="nav-link">Dashboard</a>
-    <a href="#" data-page="accounts" class="nav-link">Accounts</a>
-    <a href="#" data-page="scrape" class="nav-link">Scrape</a>
-    <a href="#" data-page="send" class="nav-link">Send</a>
+    <a href="#" data-page="dashboard" class="nav-link owner-nav">Dashboard</a>
+    <a href="#" data-page="accounts" class="nav-link owner-nav">Accounts</a>
+    <a href="#" data-page="scrape" class="nav-link owner-nav">Scrape</a>
+    <a href="#" data-page="send" class="nav-link owner-nav">Send</a>
+    <a href="#" data-page="validate" class="nav-link">Check</a>
+    <a href="#" data-page="settings" class="nav-link">Settings</a>
   </nav>
+  <div class="user-chip" id="userChip" title="Logged in as"></div>
+  <button id="btnLogout" class="logout-btn" title="Log out">Logout</button>
   <button class="hamburger" id="hamburger" aria-label="Menu"><span></span><span></span><span></span></button>
 </header>
 
@@ -59,6 +70,7 @@
           <button id="btnVerify" class="btn primary">Verify & save</button>
         </div>
         <p class="hint" id="needPassHint" hidden>This account needs a 2FA password — enter it above and press Verify.</p>
+        <p class="hint" id="codePhoneHint" hidden></p>
       </div>
       <p class="hint">⚠ Need <code>api_id</code> + <code>api_hash</code> from <a href="https://my.telegram.org" target="_blank" rel="noopener">my.telegram.org</a> — put them in <code>config.json</code> next to <code>run.py</code> and restart.</p>
     </div>
@@ -179,6 +191,12 @@
       </div>
       <div id="cpDetailStats" class="detail-stats"></div>
       <div id="cpDetailProgress" class="progress-outer"><div class="progress-inner" id="cpDetailBar"></div></div>
+      <div class="form-row" style="margin-top:14px">
+        <input id="cpMinDelay" class="input sm-num" type="number" min="1" max="43200" step="1" placeholder="Min delay (s)">
+        <input id="cpMaxDelay" class="input sm-num" type="number" min="1" max="43200" step="1" placeholder="Max delay (s)">
+        <button id="btnSetDelay" class="btn primary">Set delay</button>
+      </div>
+      <p class="hint" style="margin-top:8px">Delay applies immediately — even if the campaign is already running.</p>
       <div class="table-wrap">
         <table class="table">
           <thead><tr><th>Time</th><th>Account</th><th>Target</th><th>Status</th><th>Error</th></tr></thead>
@@ -187,27 +205,309 @@
       </div>
     </div>
   </section>
+
+  <!-- ============ VALIDATE / CHECK NUMBERS ============ -->
+  <section id="page-validate" class="page">
+    <div class="page-head">
+      <h1>Check numbers</h1>
+      <p class="muted">Paste phone numbers — see if they are Telegram users and their last-seen / online status.</p>
+    </div>
+
+    <div class="card">
+      <h2>Validate numbers</h2>
+      <div class="form-row">
+        <select id="valAccount" class="input sel"></select>
+      </div>
+      <label class="field" style="margin-top:12px">
+        <span class="label">Numbers — one per line (with country code)</span>
+        <textarea id="valNumbers" class="input" rows="6" placeholder="+15551234567&#10;+919876543210"></textarea>
+      </label>
+      <div style="margin-top:12px; display:flex; gap:8px; align-items:center">
+        <button id="btnValidate" class="btn primary">Check</button>
+        <button id="btnStopVal" class="btn" style="display:none; color:#e5484d; border-color:#e5484d">Stop</button>
+      </div>
+      <p class="hint">Note: exact last-seen is only shown for users who share it with contacts; otherwise Telegram gives an approximate status (Recently / Last week / Last month / Hidden).</p>
+    </div>
+
+    <div class="card" id="valResultsCard" hidden>
+      <div class="card-head">
+        <h2>Results <span class="count-chip" id="valCount"></span></h2>
+        <button id="btnValExport" class="btn ghost sm">Export CSV</button>
+      </div>
+      <div id="valSummary" class="detail-stats"></div>
+      <div class="table-wrap">
+        <table class="table">
+          <thead><tr><th>Number</th><th>Status</th><th>User</th><th>Username</th><th>Last seen</th></tr></thead>
+          <tbody id="valBody"></tbody>
+        </table>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ SETTINGS ============ -->
+  <section id="page-settings" class="page">
+    <div class="page-head">
+      <h1>Settings</h1>
+      <p class="muted">Buy credits with USDT, view your history, and manage accounts &amp; access.</p>
+    </div>
+
+    <div class="card" id="pricingCard">
+      <div class="card-head">
+        <h2>Services &amp; pricing</h2>
+      </div>
+      <p class="hint">Every service consumes credits from your balance. Top up with a USDT deposit below.</p>
+      <div class="table-wrap" style="margin-top:12px">
+        <table class="table">
+          <thead><tr><th>Service</th><th>Rate</th><th>Price</th><th>Credits</th></tr></thead>
+          <tbody id="pricingBody"></tbody>
+        </table>
+      </div>
+    </div>
+
+    <div class="card" id="buyCard" hidden>
+      <div class="card-head">
+        <h2>USDT deposit <span class="count-chip" id="balChip">0 credits</span></h2>
+      </div>
+      <div class="row-item" style="margin-bottom:12px">
+        <div class="main">
+          <div class="sub">USDT (TRC20) wallet — send exact pack amount, then paste the TXID below</div>
+          <div class="title sm" id="shopWallet" style="word-break:break-all"></div>
+        </div>
+        <button id="btnCopyWallet" class="btn ghost sm">Copy</button>
+      </div>
+      <label class="field">
+        <span class="label">Pack</span>
+        <select id="packSel" class="input sel"></select>
+      </label>
+      <label class="field" style="margin-top:10px">
+        <span class="label">Transaction hash (TXID)</span>
+        <input id="payTxid" class="input" placeholder="Paste the TRC20 transfer TXID here">
+      </label>
+      <button id="btnVerifyPay" class="btn primary" style="margin-top:12px">Verify & add credits</button>
+      <p class="hint">Payments are verified on-chain and credits are added instantly. Use an amount matching a pack above.</p>
+    </div>
+
+    <div class="card" id="myHistoryCard" hidden>
+      <div class="card-head">
+        <h2>My history</h2>
+        <span class="muted sm" id="myHistCount"></span>
+      </div>
+      <div class="table-wrap">
+        <table class="table">
+          <thead><tr><th>Date</th><th>Numbers checked</th><th>Found</th><th>Cost</th></tr></thead>
+          <tbody id="myChecksBody"></tbody>
+        </table>
+      </div>
+      <div style="margin-top:16px">
+        <div class="label">Credit transactions</div>
+        <div class="table-wrap" style="margin-top:8px">
+          <table class="table">
+            <thead><tr><th>Date</th><th>Type</th><th>Credits</th><th>USDT</th><th>TXID</th></tr></thead>
+            <tbody id="myTxBody"></tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
+    <div class="card" id="adminCard" hidden>
+      <div class="card-head">
+        <h2>Admin — customers</h2>
+        <button class="btn ghost sm" id="btnRefreshAdmin">Refresh</button>
+      </div>
+      <div class="form-row">
+        <input id="adName" class="input" placeholder="Name">
+        <input id="adUser" class="input" placeholder="Username (required)">
+        <input id="adPass" class="input" type="password" placeholder="Password (required)">
+        <button id="btnAddCustomer" class="btn primary">Add customer</button>
+      </div>
+      <p class="hint">Every user sees all services and pays with credits.</p>
+      <div class="table-wrap" style="margin-top:12px">
+        <table class="table" id="adCustomersTable">
+          <thead><tr><th>Name</th><th>Username</th><th>Credits</th><th></th></tr></thead>
+          <tbody id="adCustomersBody"></tbody>
+        </table>
+      </div>
+      <div class="form-row" style="margin-top:12px">
+        <select id="adCredCust" class="input sel"></select>
+        <input id="adCredAmt" class="input" type="number" min="1" placeholder="Credits to add">
+        <button id="btnAddCredits" class="btn primary">Add credits</button>
+      </div>
+
+      <div class="card-head" style="margin-top:20px; border-top:1px solid var(--border); padding-top:18px">
+        <h2>API keys</h2>
+      </div>
+      <div class="form-row">
+        <input id="adApiLabel" class="input" placeholder="Label (e.g. app #2)">
+        <input id="adApiId" class="input" type="number" min="1" placeholder="api_id">
+        <input id="adApiHash" class="input" placeholder="api_hash">
+        <button id="btnAddApiKey" class="btn primary">Add API</button>
+      </div>
+      <p class="hint">Accounts using this API spread across apps, so Telegram lets you connect more sessions. Assign each account below in <b>Accounts</b>.</p>
+      <div class="table-wrap" style="margin-top:12px">
+        <table class="table">
+          <thead><tr><th>Label</th><th>api_id</th><th>api_hash</th><th>Added</th><th></th></tr></thead>
+          <tbody id="adApiKeysBody"></tbody>
+        </table>
+      </div>
+
+      <div class="card-head" style="margin-top:20px; border-top:1px solid var(--border); padding-top:18px">
+        <h2>Services &amp; pricing</h2>
+      </div>
+      <p class="hint">Set the USDT price per volume. Users see these rates and get charged credits for every operation. Credits = ($ × volume) ÷ price-per-credit.</p>
+      <div class="table-wrap" style="margin-top:12px">
+        <table class="table">
+          <thead><tr><th>Service</th><th>Cost per</th><th>USD $</th><th>Volume</th><th></th><th></th></tr></thead>
+          <tbody id="adPricingBody"></tbody>
+        </table>
+      </div>
+
+      <div class="card-head" style="margin-top:20px; border-top:1px solid var(--border); padding-top:18px">
+        <h2>Customer support bot</h2>
+      </div>
+      <p class="hint">Set your support Telegram bot/account username. A "Support" button will appear for everyone (landing + app) and opens a chat with this bot: <b>t.me/&lt;username&gt;</b></p>
+      <div class="form-row">
+        <input id="adSupportBot" class="input" placeholder="@your_support_bot (optional)">
+        <button id="btnSaveSupport" class="btn primary">Save</button>
+      </div>
+
+      <div class="card-head" style="margin-top:20px; border-top:1px solid var(--border); padding-top:18px">
+        <h2>All checks</h2>
+      </div>
+      <div class="table-wrap">
+        <table class="table">
+          <thead><tr><th>Customer</th><th>Date</th><th>Numbers</th><th>Found</th><th>Cost</th></tr></thead>
+          <tbody id="adChecksBody"></tbody>
+        </table>
+      </div>
+      <div class="card-head" style="margin-top:20px; border-top:1px solid var(--border); padding-top:18px">
+        <h2>All transactions</h2>
+      </div>
+      <div class="table-wrap">
+        <table class="table">
+          <thead><tr><th>Customer</th><th>Date</th><th>Type</th><th>Credits</th><th>USDT</th><th>TXID</th></tr></thead>
+          <tbody id="adTxBody"></tbody>
+        </table>
+      </div>
+    </div>
+  </section>
 </main>
 
 <nav class="bottom-nav">
-  <a href="#" data-page="dashboard" class="nav-link"><span>▦</span>Home</a>
-  <a href="#" data-page="accounts" class="nav-link"><span>👤</span>Accounts</a>
-  <a href="#" data-page="scrape" class="nav-link"><span>⇣</span>Scrape</a>
-  <a href="#" data-page="send" class="nav-link"><span>✉</span>Send</a>
+  <a href="#" data-page="dashboard" class="nav-link owner-nav"><span>▦</span>Home</a>
+  <a href="#" data-page="accounts" class="nav-link owner-nav"><span>👤</span>Accounts</a>
+  <a href="#" data-page="scrape" class="nav-link owner-nav"><span>⇣</span>Scrape</a>
+  <a href="#" data-page="send" class="nav-link owner-nav"><span>✉</span>Send</a>
+  <a href="#" data-page="validate" class="nav-link"><span>✓</span>Check</a>
+  <a href="#" data-page="settings" class="nav-link"><span>⚙</span>Settings</a>
 </nav>
+
+</div><!-- /appShell -->
 
 <div id="toastBox"></div>
 
-<div id="lockScreen">
-  <div class="lock-card">
-    <div class="lock-title"><span class="brand-icon">✈</span> TG<span class="brand-accent">Bulk</span></div>
-    <p class="muted sm">Enter password to continue</p>
+<a id="supportBtn" target="_blank" rel="noopener" hidden>💬 Support</a>
+
+<div id="landing">
+  <header class="landing-nav">
+    <div class="brand"><span class="brand-icon"><img src="logo.svg" alt="WOLF" width="22" height="22"></span>Wolf TG</div>
+    <div class="landing-actions">
+      <button id="btnNavLogin" class="btn ghost">Login</button>
+      <button id="btnNavRegister" class="btn primary">Register</button>
+    </div>
+  </header>
+
+  <div class="land-bg" aria-hidden="true">
+    <img class="land-wolf" src="logo.svg" alt="">
+  </div>
+
+  <section class="hero">
+    <div class="hero-badge">⚡ Telegram marketing made easy</div>
+    <h1>Send bulk messages,<br class="line-br"> safely &amp; instantly.</h1>
+    <p class="hero-sub">Scrape group members, run multiple accounts, launch send campaigns and check any phone number on Telegram — all from one dashboard.</p>
+    <div class="hero-actions">
+      <button id="btnHeroRegister" class="btn primary lg">Get started</button>
+      <button id="btnHeroLogin" class="btn ghost lg">Login</button>
+    </div>
+  </section>
+
+  <section class="land-sec">
+    <h2>What we offer</h2>
+    <p class="muted sec-sub">Everything you need to grow and reach your audience on Telegram.</p>
+    <div class="services">
+      <div class="service"><div class="s-icon">👥</div><h3>Scrape members</h3><p>Pull member lists from Telegram groups &amp; channels with clean filters and search.</p></div>
+      <div class="service"><div class="s-icon">📤</div><h3>Bulk send campaigns</h3><p>Send messages in bulk with natural delays, multi-account rotation and media support.</p></div>
+      <div class="service"><div class="s-icon">🆔</div><h3>Account manager</h3><p>Add Telegram sessions, log in instantly and see exactly which accounts are live.</p></div>
+      <div class="service"><div class="s-icon">✓</div><h3>Check numbers</h3><p>Instantly know if a phone number is on Telegram, plus their username and last seen.</p></div>
+      <div class="service"><div class="s-icon">💳</div><h3>Credit system</h3><p>Buy credits with USDT. Payments verified on-chain, credited automatically.</p></div>
+      <div class="service"><div class="s-icon">🔓</div><h3>No lock-in</h3><p>Every user gets every service out of the box — just add credits with USDT and start.</p></div>
+    </div>
+  </section>
+
+  <section class="land-sec">
+    <h2>Simple pricing</h2>
+    <p class="muted sec-sub">One credit system for every service. Buy with USDT — use for checks, sends &amp; scrapes. No lock-in, no hidden tabs.</p>
+    <div class="table-wrap land-price-wrap">
+      <table class="table">
+        <thead><tr><th>Service</th><th>Rate</th><th>Price</th></tr></thead>
+        <tbody id="landPricing"><tr><td colspan="3" class="muted">Loading...</td></tr></tbody>
+      </table>
+    </div>
+    <div class="packs" id="landPacks"><div class="muted">Loading packs...</div></div>
+  </section>
+
+  <section class="land-sec steps-sec">
+    <h2>How it works</h2>
+    <div class="steps">
+      <div class="step"><b>1</b><span>Register an account</span></div>
+      <div class="step"><b>2</b><span>Buy credits with USDT</span></div>
+      <div class="step"><b>3</b><span>Start checking &amp; sending</span></div>
+    </div>
+    <div class="hero-actions" style="justify-content:center; margin-top:34px">
+      <button id="btnFootRegister" class="btn primary lg">Create free account</button>
+    </div>
+  </section>
+
+  <footer class="landing-foot">
+    <div class="brand"><span class="brand-icon"><img src="logo.svg" alt="WOLF" width="22" height="22"></span>Wolf TG</div>
+    <span class="muted sm">© <span id="year">2026</span> Wolf TG. All rights reserved.</span>
+  </footer>
+</div>
+
+<div id="loginModal" class="modal">
+  <div class="mod-card">
+    <button class="mod-close" id="btnCloseLogin" aria-label="Close">✕</button>
+    <div class="lock-title"><span class="brand-icon"><img src="logo.svg" alt="WOLF" width="22" height="22"></span>Wolf TG</div>
+    <p class="muted sm">Login to continue</p>
+    <input id="lockUser" class="input" placeholder="Username" autocomplete="username">
     <input id="lockPass" class="input" type="password" placeholder="Password" autocomplete="current-password">
-    <button id="btnUnlock" class="btn primary block">Unlock</button>
-    <p class="hint" id="lockErr" hidden>Wrong password</p>
+    <button id="btnUnlock" class="btn primary block">Login</button>
+    <p class="hint" id="lockErr" hidden>Wrong username or password</p>
+    <div id="forgotBox" hidden>
+      <p class="hint">Password recovery is sent to the configured Gmail. Enter your username and the password will be emailed.</p>
+      <input id="forgotUser" class="input" placeholder="Username" autocomplete="username">
+      <button id="btnSendForgot" class="btn primary block">Send password to email</button>
+      <p class="muted sm center" style="margin-top:8px"><a href="#" id="btnCancelForgot">Back to login</a></p>
+    </div>
+    <p class="hint"><a href="#" id="btnForgot">Forgot password?</a></p>
+    <p class="muted sm center" style="margin-top:12px">No account yet? <a href="#" id="gotoRegister">Register here</a></p>
   </div>
 </div>
 
-<script src="js/app.js"></script>
+<div id="registerModal" class="modal">
+  <div class="mod-card">
+    <button class="mod-close" id="btnCloseReg" aria-label="Close">✕</button>
+    <div class="lock-title"><span class="brand-icon"><img src="logo.svg" alt="WOLF" width="22" height="22"></span>Wolf TG</div>
+    <p class="muted sm">Create your account</p>
+    <input id="regName" class="input" placeholder="Your name (optional)" autocomplete="name">
+    <input id="regUser" class="input" placeholder="Username" autocomplete="username">
+    <input id="regPass" class="input" type="password" placeholder="Password" autocomplete="new-password">
+    <button id="btnRegister" class="btn primary block">Register</button>
+    <p class="hint" id="regErr" hidden></p>
+    <p class="muted sm center" style="margin-top:12px">Already registered? <a href="#" id="gotoLogin">Login here</a></p>
+  </div>
+</div>
+
+<script src="js/bgfx.js?v=2"></script>
+  <script src="js/app.js?v=11"></script>
 </body>
 </html>
