@@ -333,7 +333,7 @@ function renderAccountList() {
     const kid = Number(s.value) || null;
     try {
       await api("/accounts/" + s.dataset.accapi + "/api-key", {
-        method: "PATCH", body: { api_key_id: kid },
+        method: "PATCH", json: { api_key_id: kid },
       });
       toast("API key updated — re-login the account to apply", "ok");
     } catch (e) { toast(e.message, "err"); await loadAccounts(); }
