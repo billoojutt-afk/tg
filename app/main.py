@@ -11,7 +11,7 @@ from .models import ForgotRequest, LoginRequest, RegisterRequest
 from .routes import accounts, admin, campaigns, members, scrape, validate
 from .security import login as do_login
 from .security import logout as do_logout
-from .security import require_auth, require_owner, require_perm
+from .security import require_auth, require_owner, require_perm, require_staff
 from . import mail as mail_mod
 from .telegram_manager import tg
 
@@ -89,7 +89,7 @@ async def auth_check(_: dict = Depends(require_auth)):
     return {"ok": True}
 
 
-app.include_router(accounts.router, dependencies=[Depends(require_owner)])
+app.include_router(accounts.router, dependencies=[Depends(require_staff)])
 app.include_router(scrape.router, dependencies=[Depends(require_perm("scrape"))])
 app.include_router(members.router, dependencies=[Depends(require_perm("scrape"))])
 app.include_router(campaigns.router, dependencies=[Depends(require_perm("send"))])

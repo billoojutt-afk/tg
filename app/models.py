@@ -29,6 +29,10 @@ class PermissionsUpdate(BaseModel):
     permissions: list[str]
 
 
+class RoleUpdate(BaseModel):
+    role: str
+
+
 ALL_PERMISSIONS = ["dashboard", "accounts", "scrape", "send", "validate"]
 
 

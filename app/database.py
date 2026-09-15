@@ -123,6 +123,7 @@ CREATE TABLE IF NOT EXISTS customers (
     password    TEXT,
     credits     REAL DEFAULT 0,
     permissions TEXT NOT NULL DEFAULT '["validate"]',
+    role        TEXT NOT NULL DEFAULT 'customer',
     created_at  TEXT
 );
 
@@ -191,6 +192,8 @@ def init_db():
         if "permissions" not in cust_cols:
             conn.execute("ALTER TABLE customers ADD COLUMN permissions TEXT "
                          "NOT NULL DEFAULT '[\"validate\"]'")
+        if "role" not in cust_cols:
+            conn.execute("ALTER TABLE customers ADD COLUMN role TEXT NOT NULL DEFAULT 'customer'")
         for tbl, cols in (("campaigns", ["customer_id"]),
                           ("jobs", ["customer_id"])):
             t_cols = [r["name"] for r in conn.execute(f"PRAGMA table_info({tbl})").fetchall()]
@@ -648,6 +651,7 @@ def _cust(row):
         d["permissions"] = json.loads(d.get("permissions") or "[]")
     except (TypeError, ValueError):
         d["permissions"] = []
+    d["role"] = d.get("role") or "customer"
     return d
 
 
@@ -691,6 +695,19 @@ def get_customer_by_username(username: str) -> dict:
     with _lock, closing(_conn()) as conn:
         return _cust(conn.execute("SELECT * FROM customers WHERE username=?",
                                   (username,)).fetchone())
+
+
+def update_customer_role(customer_id: int, role: str):
+    role = role if role in ("customer", "admin") else "customer"
+    with _lock, closing(_conn()) as conn:
+        conn.execute("UPDATE customers SET role=? WHERE id=?", (role, customer_id))
+        conn.commit()
+
+
+def list_admins() -> list:
+    with _lock, closing(_conn()) as conn:
+        return [_cust(r) for r in conn.execute(
+            "SELECT * FROM customers WHERE role='admin' ORDER BY id").fetchall()]
 
 
 def list_customers() -> list:

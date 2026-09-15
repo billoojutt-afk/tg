@@ -256,13 +256,13 @@ async def support():
 
 @router.get("/me")
 async def me(user: dict = Depends(require_auth)):
-    if user.get("role") != "customer":
-        return {"role": "owner", "name": "Owner", "id": None}
+    if user.get("role") == "owner":
+        return {"role": "owner", "name": "Owner", "id": user.get("owner_user_id")}
     cust = db.get_customer(user["customer_id"])
     if not cust:
         raise HTTPException(404, "Customer not found")
     return {
-        "role": "customer",
+        "role": cust.get("role") or "customer",
         "id": cust["id"],
         "name": cust["name"],
         "username": cust["username"],

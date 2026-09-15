@@ -4,7 +4,7 @@ import secrets
 from fastapi import Depends, Header, HTTPException
 
 from . import database as db
-from .config import PASSWORD
+from .config import PASSWORD, OWNER_USER_ID
 
 _tokens = {}  # token -> payload dict
 
@@ -21,14 +21,17 @@ def _new_token(payload: dict) -> str:
 
 def login(username: str, password: str):
     username = (username or "").strip()
-    if not username:
+    # Owner may log in with the configured owner ID, while the legacy blank-username
+    # owner login remains supported for compatibility.
+    if not username or username == OWNER_USER_ID:
         if PASSWORD and password == PASSWORD:
-            return _new_token({"role": "owner"})
-        raise HTTPException(401, "Wrong password")
+            return _new_token({"role": "owner", "owner_user_id": OWNER_USER_ID})
+        raise HTTPException(401, "Wrong owner ID or password")
     cust = db.get_customer_by_username(username)
     if not cust or cust["password"] != _hash(password, username):
         raise HTTPException(401, "Wrong username or password")
-    return _new_token({"role": "customer", "customer_id": cust["id"]})
+    role = cust.get("role") or "customer"
+    return _new_token({"role": role, "customer_id": cust["id"]})
 
 
 def _resolve(authorization) -> dict:

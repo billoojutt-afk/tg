@@ -311,7 +311,7 @@
 
     <div class="card" id="adminCard" hidden>
       <div class="card-head">
-        <h2>Admin — customers</h2>
+        <h2>Owner — users &amp; access</h2>
         <button class="btn ghost sm" id="btnRefreshAdmin">Refresh</button>
       </div>
       <div class="form-row">
@@ -320,10 +320,15 @@
         <input id="adPass" class="input" type="password" placeholder="Password (required)">
         <button id="btnAddCustomer" class="btn primary">Add customer</button>
       </div>
-      <p class="hint">Every user sees all services and pays with credits.</p>
+      <p class="hint">Only the owner can change roles. Use the user's ID to grant or revoke admin access. Admins can manage Telegram accounts and operational tools, but cannot access owner-only settings.</p>
+      <div class="form-row" style="margin-top:12px">
+        <input id="adAdminId" class="input" type="number" min="1" placeholder="User ID">
+        <button id="btnGrantAdmin" class="btn primary">Grant admin</button>
+        <button id="btnRevokeAdmin" class="btn ghost">Revoke admin</button>
+      </div>
       <div class="table-wrap" style="margin-top:12px">
         <table class="table" id="adCustomersTable">
-          <thead><tr><th>Name</th><th>Username</th><th>Credits</th><th></th></tr></thead>
+          <thead><tr><th>ID</th><th>Name</th><th>Username</th><th>Role</th><th>Credits</th><th></th></tr></thead>
           <tbody id="adCustomersBody"></tbody>
         </table>
       </div>
@@ -478,7 +483,7 @@
     <button class="mod-close" id="btnCloseLogin" aria-label="Close">✕</button>
     <div class="lock-title"><span class="brand-icon"><img src="logo.svg" alt="WOLF" width="22" height="22"></span>Wolf TG</div>
     <p class="muted sm">Login to continue</p>
-    <input id="lockUser" class="input" placeholder="Username" autocomplete="username">
+    <input id="lockUser" class="input" placeholder="Username or Owner ID" autocomplete="username">
     <input id="lockPass" class="input" type="password" placeholder="Password" autocomplete="current-password">
     <button id="btnUnlock" class="btn primary block">Login</button>
     <p class="hint" id="lockErr" hidden>Wrong username or password</p>

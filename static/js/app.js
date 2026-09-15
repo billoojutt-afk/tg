@@ -102,7 +102,14 @@ function renderUserChip() {
   const chip = $("#userChip");
   if (!S.me) return;
   if (S.me.role === "owner") {
-    chip.innerHTML = '<span class="chip-ico">🛡</span><span class="chip-name">Owner</span>';
+    chip.innerHTML = '<span class="chip-ico">🛡</span><span class="chip-name">Owner</span>' +
+      (S.me.id ? `<span class="chip-id"> (ID ${esc(S.me.id)})</span>` : "");
+  } else if (S.me.role === "admin") {
+    const n = S.me.name || S.me.username || "—";
+    const un = S.me.username ? "@" + S.me.username : "";
+    const sub = [un, S.me.id ? "ID " + S.me.id : ""].filter(Boolean).join(" · ");
+    chip.innerHTML = `<span class="chip-ico">🛡</span><span class="chip-name">${esc(n)} · Admin</span>` +
+      (sub ? `<span class="chip-id"> (${esc(sub)})</span>` : "");
   } else {
     const n = S.me.name || S.me.username || "—";
     const un = S.me.username ? "@" + S.me.username : "";
@@ -120,7 +127,7 @@ async function afterLogin() {
   buildNav();
   renderUserChip();
   showAppShell();
-  $("#adminCard").hidden = S.customerMode;
+  $("#adminCard").hidden = me.role !== "owner";
   $("#buyCard").hidden = !S.customerMode;
 if (S.customerMode) {
     $("#myHistoryCard").hidden = false;
@@ -138,7 +145,14 @@ if (S.customerMode) {
 }
 
 function buildNav() {
-  $$(".nav-link").forEach((a) => { a.style.display = ""; });
+  const role = S.role;
+  $$(".nav-link").forEach((a) => {
+    const page = a.dataset.page;
+    const allowed = role === "owner" || role === "admin"
+      ? ["dashboard", "accounts", "scrape", "send", "validate", "settings"].includes(page)
+      : ["validate", "settings"].includes(page);
+    a.style.display = allowed ? "" : "none";
+  });
 }
 
 function defaultPage() {
@@ -1118,7 +1132,7 @@ async function adminAddApiKey() {
   const label = $("#adApiLabel").value.trim();
   if (!api_id || !api_hash) return toast("api_id and api_hash are required", "err");
   try {
-    await api("/admin/api-keys", { method: "POST", body: { api_id: Number(api_id), api_hash, label } });
+    await api("/admin/api-keys", { method: "POST", json: { api_id: Number(api_id), api_hash, label } });
     $("#adApiId").value = ""; $("#adApiHash").value = ""; $("#adApiLabel").value = "";
     toast("API key added", "ok");
     adminLoadData();
@@ -1147,6 +1161,19 @@ async function saveSupport() {
   } catch (e) { toast(e.message, "err"); }
 }
 
+async function changeAdminRoleFromId(role) {
+  const input = $("#adAdminId");
+  const id = Number(input.value);
+  if (!id) { toast("Enter a valid user ID", "err"); return; }
+  try {
+    await api("/admin/customers/" + id + "/role", { method: "PATCH", json: { role } });
+    toast(role === "admin" ? "Admin access granted" : "Admin access revoked", "ok");
+    input.value = "";
+    await adminRefresh();
+  } catch (e) { toast(e.message, "err"); }
+}
+
+
 async function adminRefresh() {
   let d;
   try { d = await api("/admin/customers"); }
@@ -1156,12 +1183,19 @@ async function adminRefresh() {
   body.innerHTML = custs.length
     ? custs.map((c) => `
       <tr>
+        <td>${esc(c.id)}</td>
         <td>${esc(c.name || "—")}</td>
         <td>@${esc(c.username)}</td>
+        <td>${c.role === "admin" ? "🛡 Admin" : "User"}</td>
         <td>${Math.floor(c.credits || 0).toLocaleString()} <button class="btn ghost sm" data-bump="${c.id}">+1000</button></td>
-        <td class="ta-r"><button class="btn ghost sm" data-del="${c.id}">Delete</button></td>
+        <td class="ta-r">
+          ${c.role === "admin"
+            ? `<button class="btn ghost sm" data-revoke="${c.id}">Revoke</button>`
+            : `<button class="btn ghost sm" data-grant="${c.id}">Make admin</button>`}
+          <button class="btn ghost sm" data-del="${c.id}">Delete</button>
+        </td>
       </tr>`).join("")
-    : `<tr><td colspan="4" class="muted">No customers yet.</td></tr>`;
+    : `<tr><td colspan="6" class="muted">No customers yet.</td></tr>`;
   $$("#adCustomersBody [data-bump]").forEach((b) => b.addEventListener("click", async () => {
     try {
       await api("/admin/credits", { method: "POST", json: { customer_id: Number(b.dataset.bump), credits: 1000 } });
@@ -1174,6 +1208,15 @@ async function adminRefresh() {
     try {
       await api("/admin/customers/" + b.dataset.del, { method: "DELETE" });
       toast("Customer deleted", "ok");
+      await adminRefresh();
+    } catch (e) { toast(e.message, "err"); }
+  }));
+  $$("#adCustomersBody [data-grant], #adCustomersBody [data-revoke]").forEach((b) => b.addEventListener("click", async () => {
+    const id = Number(b.dataset.grant || b.dataset.revoke);
+    const role = b.dataset.grant ? "admin" : "customer";
+    try {
+      await api("/admin/customers/" + id + "/role", { method: "PATCH", json: { role } });
+      toast(role === "admin" ? "Admin access granted" : "Admin access revoked", "ok");
       await adminRefresh();
     } catch (e) { toast(e.message, "err"); }
   }));
@@ -1310,6 +1353,8 @@ function init() {
   $("#btnAddApiKey").addEventListener("click", adminAddApiKey);
   $("#btnSaveSupport").addEventListener("click", saveSupport);
   $("#btnRefreshAdmin").addEventListener("click", adminRefresh);
+  $("#btnGrantAdmin").addEventListener("click", () => changeAdminRoleFromId("admin"));
+  $("#btnRevokeAdmin").addEventListener("click", () => changeAdminRoleFromId("customer"));
   ["cpFUsername", "cpFPhone", "cpFNoBot"].forEach((id) => $("#" + id).addEventListener("change", (e) => {
     S.campFilters[id === "cpFUsername" ? "has_username" : id === "cpFPhone" ? "has_phone" : "exclude_bots"] = e.target.checked;
   }));

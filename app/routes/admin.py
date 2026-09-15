@@ -3,7 +3,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from .. import database as db
 from ..models import (ALL_PERMISSIONS, AddApiKeyRequest, AddCredits,
                       CreateCustomer, PermissionsUpdate, PricingUpdate,
-                      SupportSettings)
+                      SupportSettings, RoleUpdate)
 from ..security import require_owner
 
 router = APIRouter(prefix="/api/admin", tags=["admin"], dependencies=[Depends(require_owner)])
@@ -52,6 +52,22 @@ async def set_permissions(cid: int, body: PermissionsUpdate):
     if not db.get_customer(cid):
         raise HTTPException(404, "Customer not found")
     db.update_customer_permissions(cid, _clean_perms(body.permissions))
+    return {"ok": True, "customer": db.get_customer(cid)}
+
+
+@router.patch("/customers/{cid}/role")
+async def set_role(cid: int, body: RoleUpdate):
+    if body.role not in ("customer", "admin"):
+        raise HTTPException(400, "Role must be customer or admin")
+    cust = db.get_customer(cid)
+    if not cust:
+        raise HTTPException(404, "Customer not found")
+    db.update_customer_role(cid, body.role)
+    # Admins get the operational permissions automatically; customers retain their own permissions.
+    if body.role == "admin":
+        db.update_customer_permissions(cid, ALL_PERMISSIONS)
+    else:
+        db.update_customer_permissions(cid, ["validate"])
     return {"ok": True, "customer": db.get_customer(cid)}
 
 
@@ -153,7 +169,7 @@ async def get_settings():
 
 
 @router.put("/settings/support")
-async def set_support(body: SupportSettings):
+async def set_support(body: SupportSettings, RoleUpdate):
     username = (body.username or "").strip().lstrip("@")
     db.set_setting("support_bot", username)
     return {"ok": True, "settings": {"support_bot": db.get_setting("support_bot")}}

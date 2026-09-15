@@ -44,6 +44,10 @@ SMTP_APP_PASSWORD = (CONFIG.get("smtp_app_password") or "").strip()
 SMTP_HOST = CONFIG.get("smtp_host") or "smtp.gmail.com"
 SMTP_PORT = int(CONFIG.get("smtp_port") or 587)
 
+# Stable ID shown for the owner and used as the owner identity in the dashboard.
+# Set OWNER_USER_ID in Render environment variables (do not put it in config.json).
+OWNER_USER_ID = (os.environ.get("OWNER_USER_ID") or "owner").strip()
+
 # 1000 credits = $3 USDT (0.003 $ per credit) as default price
 PRICE_PER_CREDIT = 0.003
 CREDIT_PACKS = [

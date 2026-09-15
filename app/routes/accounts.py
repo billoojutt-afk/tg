@@ -1,7 +1,8 @@
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 
 from .. import database as db
 from ..models import SendCodeRequest, VerifyRequest, SetApiKeyRequest
+from ..security import require_auth
 from ..telegram_manager import (LoginError, TwoFARequired,
                                 api_creds_available, resolve_api_creds, tg)
 
@@ -14,6 +15,16 @@ def _require_config():
             400,
             "API credentials missing. Add an API key below or set api_id / api_hash in "
             "config.json, then restart the server.")
+
+
+@router.get("/public")
+async def public_accounts(_: dict = Depends(require_auth)):
+    accs = db.active_accounts()
+    return {"accounts": [
+        {"id": a["id"], "phone": a.get("phone") or "", "username": a.get("username") or "",
+         "status": a.get("status"), "spam_limited": bool(a.get("spam_limited"))}
+        for a in accs
+    ]}
 
 
 @router.get("")
