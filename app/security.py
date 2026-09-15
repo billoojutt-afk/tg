@@ -71,3 +71,9 @@ def require_perm(perm: str):
     def dep(payload: dict = Depends(current)) -> dict:
         return payload
     return dep
+
+def require_staff(payload: dict = Depends(current)) -> dict:
+    """Allow only the owner or users explicitly promoted to admin."""
+    if payload.get("role") not in ("owner", "admin"):
+        raise HTTPException(403, "Admin access required")
+    return payload

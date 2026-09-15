@@ -1,40 +1,24 @@
-# TG Sender — Data-Safe Update
+# TG Sender — Data-Safe Admin Update
 
-This package contains CODE ONLY. It intentionally does not include:
+This package contains application code only. It intentionally excludes existing user data and secrets:
+- SQLite databases (`*.db`, `*.sqlite`, `*.sqlite3`)
+- `config.json` and `.env*`
+- Telegram `.session` files
+- `media/`, `exports/`
+- logs and Python cache
 
-- app.db / tg_sender.db / SQLite databases
-- config.json
-- media/ or exports/
-- Python __pycache__ files
-- log files
-- Telegram .session files
+## Update safely
+1. Back up your existing database and Telegram session files.
+2. Replace application code files with the files from this package.
+3. Keep your existing database, config/secrets, media, exports, and session files.
+4. Restart the app.
 
-## Important: preserve existing accounts
-
-Before updating an existing installation:
-
-1. Make a backup of your current `app.db`.
-2. Extract this ZIP into a temporary folder.
-3. Copy/replace the application CODE files into your existing project.
-4. Do NOT delete or replace your existing `app.db`.
-5. Do NOT delete your existing configuration/secrets.
-6. Restart the server.
-
-The application database initialization uses `CREATE TABLE IF NOT EXISTS` and only adds missing columns with `ALTER TABLE`; it is designed to preserve existing rows.
+The database initialization is additive: it creates missing tables and adds missing columns; it does not intentionally delete existing account rows.
 
 ## Render
+SQLite data stored on an ephemeral Render filesystem can be lost across service replacement/redeploy. Use a persistent disk or an external persistent database if you need accounts/sessions to survive redeploys.
 
-If the service is using SQLite on Render, make sure the database is stored on a persistent disk/volume or move the database to a persistent external database. A normal Render redeploy can otherwise lose files stored on an ephemeral filesystem.
+Set the owner ID in Render Environment Variables:
+OWNER_USER_ID=YOUR_OWNER_ID
 
-Set secrets through Render Environment Variables rather than committing `config.json`.
-
-Required owner variable:
-
-`OWNER_USER_ID=YOUR_OWNER_ID`
-
-Telegram API credentials can be provided with:
-
-`API_ID=...`
-`API_HASH=...`
-
-The database stores Telegram account session strings and API-key assignments, so preserving the database is essential when updating the code.
+Do not commit API hashes, passwords, or other secrets to GitHub.
