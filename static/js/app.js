@@ -1131,13 +1131,39 @@ async function adminAddApiKey() {
   const api_hash = $("#adApiHash").value.trim();
   const label = $("#adApiLabel").value.trim();
   if (!api_id || !api_hash) return toast("api_id and api_hash are required", "err");
+
+  // Send a real JSON string explicitly. This avoids browsers/extensions or stale
+  // helper code turning the object into the literal "[object Object]".
+  const token = localStorage.getItem("tg_token");
+  const headers = { "Content-Type": "application/json" };
+  if (token) headers["Authorization"] = "Bearer " + token;
+
   try {
-    await api("/admin/api-keys", { method: "POST", json: { api_id: Number(api_id), api_hash, label } });
-    $("#adApiId").value = ""; $("#adApiHash").value = ""; $("#adApiLabel").value = "";
+    const res = await fetch("/api/admin/api-keys", {
+      method: "POST",
+      headers,
+      body: JSON.stringify({
+        api_id: Number(api_id),
+        api_hash: api_hash,
+        label: label
+      })
+    });
+    let data = null;
+    try { data = await res.json(); } catch (_) {}
+    if (!res.ok) {
+      throw new Error((data && data.detail) || "Request failed (" + res.status + ")");
+    }
+
+    $("#adApiId").value = "";
+    $("#adApiHash").value = "";
+    $("#adApiLabel").value = "";
     toast("API key added", "ok");
-    adminLoadData();
-    loadAccounts();
-  } catch (e) { toast(e.message, "err"); }
+    await adminLoadData();
+    await loadAccounts();
+  } catch (e) {
+    toast(e.message, "err");
+    console.error("Add API key failed:", e);
+  }
 }
 
 async function updateSupportButton() {

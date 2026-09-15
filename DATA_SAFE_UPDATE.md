@@ -22,3 +22,6 @@ Set the owner ID in Render Environment Variables:
 OWNER_USER_ID=YOUR_OWNER_ID
 
 Do not commit API hashes, passwords, or other secrets to GitHub.
+
+## API key add fix
+The Add API action now sends an explicit JSON payload and the frontend cache version is bumped to v12, preventing the `[object Object]` request-body error.
